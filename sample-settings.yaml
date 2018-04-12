@@ -1,0 +1,4 @@
+run board: https://docs.google.com/presentation/d/e/.../pub?start=true&loop=true&delayms=60000
+schedule:
+  sheet: https://docs.google.com/spreadsheets/d/.../edit
+  poll at: Sat 1:30
