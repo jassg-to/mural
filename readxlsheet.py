@@ -56,7 +56,7 @@ def get_schedule() -> Iterable[ScheduleRule]:
 
     # This declares the sheet/range we want and fetches its data
     spreadsheet_id = search(r'/spreadsheets/d/([^/]+)', settings.schedule_sheet).group(1)
-    range_name = 'Sheet1!A3:N'
+    range_name = settings.schedule_range
     result = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
     values = result.get('values', [])
 

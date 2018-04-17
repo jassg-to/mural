@@ -12,6 +12,7 @@ class Settings:
         doc = yaml.load(open('settings.yaml'))
         self.run_board = doc['run board']
         self.schedule_sheet = doc['schedule']['sheet']
+        self.schedule_range = doc['schedule']['range']
         self.schedule_poll_at = doc['schedule']['poll at']
 
 

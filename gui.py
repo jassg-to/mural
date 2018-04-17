@@ -13,7 +13,7 @@ class Window(Tk):
         super().__init__()
         self.geometry('300x300')
         self.title('Mural Digital')
-        self.text = ScrolledText(self, height=1)
+        self.text = ScrolledText(self, height=3)
         self.text.pack(fill=BOTH, expand=1)
 
         @self._add_button
