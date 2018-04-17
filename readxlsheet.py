@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
+from datetime import timedelta
 from os import path, makedirs
-from re import compile
+from re import compile, search
+from typing import Iterable
 
-from httplib2 import Http
 from apiclient import discovery
+from httplib2 import Http
 from oauth2client import client
 from oauth2client import tools
 from oauth2client.file import Storage
+
+from common import settings, ScheduleRule
 
 flags = ArgumentParser(parents=[tools.argparser]).parse_args()
 
@@ -43,9 +47,7 @@ def get_credentials():
     return credentials
 
 
-def main():
-    # TODO: Check back every day for rule changes
-
+def get_schedule() -> Iterable[ScheduleRule]:
     # This declares the Google Sheets API
     credentials = get_credentials()
     http = credentials.authorize(Http())
@@ -53,27 +55,35 @@ def main():
     service = discovery.build('sheets', 'v4', http=http, discoveryServiceUrl=discovery_url)
 
     # This declares the sheet/range we want and fetches its data
-    spreadsheet_id = 'haha good one'
+    spreadsheet_id = search(r'/spreadsheets/d/([^/]+)', settings.schedule_sheet).group(1)
     range_name = 'Sheet1!A3:N'
     result = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
     values = result.get('values', [])
 
-    # We'll only use cells that look like a time (3:45)
+    # We'll only use cells that look like a time (e.g.: 3:45)
     regex = compile(r'^(\d+):(\d+)$')
+
     # Column meanings are hardcoded
-    day_names = 'Sun Mon Tue Wed Thu Fri Sat'.split()
-    columns = [(a, b) for a in range(7) for b in ('on', 'off')]
-    # Rules will be stored as a flat list
-    rules = []
+    # 'day' has a double meaning:
+    #   0  means daily;         also means the poll action
+    #  1-7 means monday-sunday; also means the normal on/off action
+    # Jagged ordering takes into account how the spreadsheet was designed
+    columns = [(day, action) for day in (7, 1, 2, 3, 4, 5, 6, 0) for action in ('on', 'off')]
+
+    # Rules will be returned as found on a horizontal scan
     for row in values:
         for (day, action), value in zip(columns, row):
             match = regex.match(value) if value else None
             if match:
                 hour, minute = map(int, match.groups())
-                rules.append((day, hour, minute, action))
-    rules.sort()
-    return rules
+                time = timedelta(days=day, hours=hour, minutes=minute)
+                yield ScheduleRule(time, action if day else 'poll')
+
+
+def test():
+    for i in sorted(get_schedule()):
+        print(i)
 
 
 if __name__ == '__main__':
-    main()
+    test()
