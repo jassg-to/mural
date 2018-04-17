@@ -1,4 +1,5 @@
 run board: https://docs.google.com/presentation/d/e/.../pub?start=true&loop=true&delayms=60000
 schedule:
   sheet: https://docs.google.com/spreadsheets/d/.../edit
+  range: Sheet1!A3:P
   poll at: Sat 1:30
