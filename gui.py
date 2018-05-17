@@ -4,7 +4,7 @@ from tkinter.scrolledtext import ScrolledText
 from typing import Callable
 from webbrowser import open_new_tab
 
-from common import settings, Schedule
+from common import settings, ScheduleCalculator
 from readxlsheet import get_schedule
 
 
@@ -34,7 +34,7 @@ class Window(Tk):
             self.calculate_schedule()
             return 0
 
-        self.schedule = Schedule(get_schedule)
+        self.schedule_calculator = ScheduleCalculator(get_schedule)
 
     def _add_button(self, func: Callable[[], int]):
         def wrapper():
@@ -52,7 +52,7 @@ class Window(Tk):
         return wrapper
 
     def calculate_schedule(self):
-        agenda, wait, actions = self.schedule.calculate()
+        agenda, wait, actions = self.schedule_calculator.calculate()
         # TODO
         self.text.insert(INSERT, '\n'.join(agenda))
         self.after(wait, lambda: print(actions))

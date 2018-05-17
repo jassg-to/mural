@@ -50,7 +50,7 @@ def get_next_schedule(present: datetime, schedule: timedelta) -> datetime:
     return next_schedule
 
 
-class Schedule:
+class ScheduleCalculator:
     def __init__(self, getter: Callable[[], Iterable[ScheduleRule]]):
         self.get = getter
         self.rules = []
