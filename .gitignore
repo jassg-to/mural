@@ -1,3 +1,5 @@
+__pycache__
 /.idea
-/settings.yaml
+/venv
 /client_secret.json
+/settings.yaml
