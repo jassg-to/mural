@@ -1,0 +1,6 @@
+__pycache__
+/.idea
+/venv
+/client_secret.json
+/settings.yaml
+._DS_Store
