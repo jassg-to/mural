@@ -7,4 +7,4 @@ Works great with [Google Slides](https://www.google.com/slides/about).
 ## Setup
 
 Requires Debian-based compatible hardware. Raspberry Pi is recommended.
-Detailed instructions [here](docs/hardware.md).
+Detailed instructions [here](raspberry-pi/docs/hardware.md).

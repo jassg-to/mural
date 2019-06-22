@@ -38,4 +38,16 @@ raspberrypi login: _
 1. Finish.
 1. To confirm that everything was set up correctly, run these commands to check:
     - `date` to see current time.
-    - `ip a` to see current IP address. Check `inet` under `wlan0`.
+        - If timezone is incorrect, run `sudo raspi-config` again and fix it.
+        - If timezone is correct but time is wrong, see [`date`'s manual](https://linux.die.net/man/1/date) to fix it.
+    - `ip a` to see current IP address.
+        - Check `inet` under `wlan0` for WiFi.
+        - If there are no IP addresses under `wlan0`, run `sudo raspi-config` again and re-configure WiFi.
+
+# Supporting Software
+
+This command will install all the remaining dependencies using [this script](../install.sh):
+
+```text
+curl -L https://raw.githubusercontent.com/jassg-to/mural-digital/leaner/raspberry-pi/install.sh | bash
+```
