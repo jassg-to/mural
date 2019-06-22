@@ -12,11 +12,30 @@ Microsoft Windows does not come with an SSH client, so you'll need to install
     ![Screenshot of Etcher.](etcher.png)
 1. After flashing is completed, eject this device (do it in software first).
 1. Fit the card in the specific SD card slot under the Raspberry Pi board.
-1. Assemble the rest of the Raspberry Pi kit and turn it on.
-    Remember to connect the power supply last.
+1. Assemble the rest of the Raspberry Pi kit, along with a keyboard, and a TV or monitor.
+1. Connect the power supply last.
 
 # Operating System
 
-The first and most important task is changing the password.
-**YOU MUST DO THIS!** Untargeted attacks like ransomware, spambot, DDoS zombies, etc. rely heavily on spread through
-[default passwords](https://www.us-cert.gov/ncas/alerts/TA13-175A) in private and public networks.
+When you first turn the Raspberry Pi device, a bunch of things will fly by, until you get to the login prompt:
+
+```text
+Raspbian GNU/Linux 9 raspberrypi tty1
+raspberrypi login: _
+```
+
+1. Enter the default login `pi` and the default password `raspberry`
+1. Run the command `sudo raspi-config`
+1. Change User Password. 💣 **YOU ABSOLUTELY MUST DO THIS!** 💣
+    Untargeted attacks like ransomware, spambot, DDoS zombies, etc. rely heavily on spread through
+    [default passwords](https://www.us-cert.gov/ncas/alerts/TA13-175A) in private and public networks.
+1. Network Options ▶ WiFi
+    - Set country correctly.
+    - Your network name is the SSID. Be exact, it's like a password.
+    - Your network password is the passphrase. Same rules.
+1. Boot options ▶ Wait for Network at Boot ▶ Yes
+1. Localisation Options ▶ Change Timezone
+1. Finish.
+1. To confirm that everything was set up correctly, run these commands to check:
+    - `date` to see current time.
+    - `ip a` to see current IP address. Check `inet` under `wlan0`.
