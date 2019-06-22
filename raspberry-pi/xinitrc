@@ -1,0 +1,8 @@
+#!/bin/bash
+
+url='https://google.ca'
+geometry=$(xwininfo -root | grep geometry)
+echo "<<$geometry>>"
+
+xdotool search --sync --onlyvisible --class "Firefox" key F11 &
+firefox-esr -private-window "$url" $geometry
