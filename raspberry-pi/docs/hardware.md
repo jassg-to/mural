@@ -44,10 +44,22 @@ raspberrypi login: _
         - Check `inet` under `wlan0` for WiFi.
         - If there are no IP addresses under `wlan0`, run `sudo raspi-config` again and re-configure WiFi.
 
-# Supporting Software
+# Software
 
-This command will install all the remaining dependencies using [this script](../install.sh):
+Run these commands to install the `git` command:
 
 ```text
-curl -L https://raw.githubusercontent.com/jassg-to/mural-digital/leaner/raspberry-pi/install.sh | bash
+sudo apt update
+sudo apt install git
+```
+
+Now run the `git` command to clone this repository. Example:
+`git clone https://github.com/jassg-to/mural-digital.git`
+
+This repository includes [a script](../install.sh)
+that updates your system and installs all remaining dependencies
+To run it, type:
+
+```text
+mural-digital/raspberry-pi/install.sh
 ```
