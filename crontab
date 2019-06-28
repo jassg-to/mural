@@ -1,0 +1,41 @@
+#   There are two ways to update the crontab:
+#
+#   A. Remotely, from git.
+#      1. You must update the schedule in the git repo, never in this device.
+#      2. There's a "git pull" schedule to poll git for changes.
+#         The * in the weekday column means everyday.
+#
+#   B. Editing the crontab directly from the device.
+#      1. You must update this file using an editor like vim.
+#      2. You must remove the "git pull" schedule.
+#
+SHELL=/bin/bash
+PATH=/bin:/usr/bin:/usr/local/bin
+MD_HOME=/home/pi/md
+ON=$MD_HOME/on.sh
+OFF=$MD_HOME/off.sh
+
+# min hr day mo weekday command
+    0  2  *  *   *      cd $MD_HOME; git pull
+    0 10  *  *  Sun     $ON
+    0 15  *  *  Sun     $OFF
+    0 17  *  *  Sun     $ON
+    0 18  *  *  Sun     $OFF
+   30 19  *  *  Sun     $ON
+    0 20  *  *  Sun     $OFF
+   45 17  *  *  Tue     $ON
+   30 19  *  *  Tue     $OFF
+    0 21  *  *  Tue     $ON
+    0 22  *  *  Tue     $OFF
+   30 17  *  *  Wed     $ON
+   15 20  *  *  Wed     $OFF
+    0 18  *  *  Thu     $ON
+   30 19  *  *  Thu     $OFF
+    0 21  *  *  Thu     $ON
+   30 31  *  *  Thu     $OFF
+    0  9  *  *  Sat     $ON
+    0 12  *  *  Sat     $OFF
+   45 18  *  *  Sat     $ON
+    0 19  *  *  Sat     $OFF
+    5 20  *  *  Sat     $ON
+   15 20  *  *  Sat     $OFF

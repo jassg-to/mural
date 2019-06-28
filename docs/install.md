@@ -48,10 +48,8 @@ raspberrypi login: _
 
 Run these commands to install some dependencies:
 
-```text
-sudo apt update
-sudo apt install git cec-client
-```
+* `sudo apt update`
+* `sudo apt install git cec-client`
 
 Now run the `git` command to clone this repository into a folder called `md`. Example:
 
@@ -59,7 +57,7 @@ Now run the `git` command to clone this repository into a folder called `md`. Ex
 
 Finally, install the scheduler:
 
-* `/home/pi/md/crontab.sh`
+* `sudo ln -s /home/pi/md/crontab /etc/crontab.d/md`
 
 You can edit that file to update the schedule. Please read the comments carefully.
 
