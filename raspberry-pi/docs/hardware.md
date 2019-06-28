@@ -46,20 +46,42 @@ raspberrypi login: _
 
 # Software
 
-Run these commands to install the `git` command:
+Run these commands to install some dependencies:
 
 ```text
 sudo apt update
-sudo apt install git
+sudo apt install git cec-client
 ```
 
-Now run the `git` command to clone this repository. Example:
-`git clone https://github.com/jassg-to/mural-digital.git`
+Now run the `git` command to clone this repository into a folder called `md`. Example:
 
-This repository includes [a script](../install.sh)
-that updates your system and installs all remaining dependencies
-To run it, type:
+* `git clone https://github.com/jassg-to/mural-digital.git /home/pi/md`
+
+Finally, install the scheduler:
+
+* `/home/pi/md/crontab.sh`
+
+You can edit that file to update the schedule. Please read the comments carefully.
+
+# Install Display Browser
+
+Finally install the digital signage browser.
+
+[Screenly](https://screenly.io) is suggested. This will take 15 minutes to a few hours.
 
 ```text
-mural-digital/raspberry-pi/install.sh
+bash <(curl -sL https://www.screenly.io/install-ose.sh)
+```
+
+It'll ask you a few questions at the beginning.
+If you're unsure what to answer, press Enter to choose the suggested answer.
+After these questions, you can disconnect the keyboard because you no longer need it.
+
+At the end of the installation it'll show you a web address for you to visit from a normal computer.
+That's where you set the web address. Remember to mark it active after you create the asset.
+
+# Set web address
+
+```text
+https://docs.google.com/presentation/d/e/2PACX-1vQ7LGi9WeOpcex-d2VXgQeT4pfHqd9h3YXWkDr9iReuKIIQMzPNBVZ5-J5xEh6wqvyO_aK858H4nQto/pub?start=true&loop=true&delayms=30000
 ```
