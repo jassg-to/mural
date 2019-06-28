@@ -3,4 +3,4 @@ __pycache__
 /venv
 /client_secret.json
 /settings.yaml
-._DS_Store
+.DS_Store

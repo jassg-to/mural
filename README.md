@@ -1,8 +1,9 @@
-# Mural Digital
+# CEC Power Schedule
 
-Simple digital signage using a web browser and any publicly accessible web page.
+Simple power schedule using HDMI signals to turn a screen with signage on and off.
 
-Works great with [Google Slides](https://www.google.com/slides/about).
+Works great with [Google Slides](https://www.google.com/slides/about)
+and [Screenly](https://www.screenly.io).
 
 ## Setup
 
