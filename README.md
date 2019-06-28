@@ -6,5 +6,5 @@ Works great with [Google Slides](https://www.google.com/slides/about).
 
 ## Setup
 
-Requires Debian-based compatible hardware. Raspberry Pi is recommended.
-Detailed instructions [here](raspberry-pi/docs/hardware.md).
+Requires Debian-based compatible system. A Raspberry Pi with Raspbian is recommended.
+Detailed instructions [here](docs/install.md).
