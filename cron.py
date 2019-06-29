@@ -13,7 +13,7 @@ here = os.path.split(os.path.realpath(__file__))[0]
 
 def main():
     schedule = get_schedule()
-    table = '\n'.join(emit(parse(schedule)))
+    table = ''.join(emit(parse(schedule)))
     print("The new cron table is:")
     print(table)
     set_crontab(table)
@@ -22,7 +22,7 @@ def main():
 def get_schedule():
     name = os.path.join(here, 'schedule.yaml')
     file = open(name, 'r')
-    data = yaml.load(file)
+    data = yaml.safe_load(file)
     return data
 
 
@@ -50,7 +50,7 @@ def parse(schedule):
 def emit(parsed_jobs):
     for weekday, hour, minute, job in parsed_jobs:
         full_path = os.path.join(here, job)
-        yield "%2s %2s * * %3s\t%s" % (minute, hour, weekday, full_path)
+        yield "%2s %2s * * %3s\t%s\n" % (minute, hour, weekday, full_path)
 
 
 def set_crontab(table):
