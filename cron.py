@@ -12,11 +12,17 @@ here = os.path.split(os.path.realpath(__file__))[0]
 
 
 def main():
+    git_pull()
     schedule = get_schedule()
     table = ''.join(emit(parse(schedule)))
     print("The new cron table is:")
     print(table)
     set_crontab(table)
+
+
+def git_pull():
+    os.chdir(here)
+    subprocess.call(['/usr/bin/git', 'pull'])
 
 
 def get_schedule():
