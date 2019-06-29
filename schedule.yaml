@@ -1,0 +1,30 @@
+#
+# Format:
+#
+#     weekday1:
+#       - H1:M1 - H2:M2       # turns on at H1:M1 and turns off at H2:M2
+#       - H3:M3 - H4:M4       # turns on at H3:M3 and turns off at H4:M4
+#       - cron.py H5:M5        # updates the schedule at H5:M5
+#
+# All times must be in 24 hours.
+# Weekdays can ONLY be either of: Sun Mon Tue Wed Thu Fri Sat "*"
+#  ("*" means every day)
+#
+"*":
+  - cron.py 02:00
+Sun:
+  - 10:00 - 15:00
+  - 17:00 - 18:00
+  - 19:30 - 20:00
+Tue:
+  - 17:45 - 19:30
+  - 21:00 - 22:00
+Wed:
+  - 17:30 - 20:15
+Thu:
+  - 18:00 - 19:30
+  - 21:00 - 21:30
+Sat:
+  - 09:00 - 12:00
+  - 18:45 - 19:00
+  - 20:05 - 20:15
