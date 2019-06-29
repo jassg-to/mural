@@ -66,4 +66,4 @@ You should see a black screen with a prompt at the top:
 1. Install the schedule:
     * `mural-digital/cron.py`
 
-You can edit that file to update the schedule. Please read the comments carefully.
+And done! You can press `Ctrl`+`D` to leave and `Alt`+`F2` to return to the signage.
