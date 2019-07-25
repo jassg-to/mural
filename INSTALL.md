@@ -27,8 +27,6 @@ Click `Add Asset`. Paste the published presentation URL below and click `Save`.
 
     https://docs.google.com/presentation/d/e/2PACX-1vQ7LGi9WeOpcex-d2VXgQeT4pfHqd9h3YXWkDr9iReuKIIQMzPNBVZ5-J5xEh6wqvyO_aK858H4nQto/pub?start=true&loop=true&delayms=30000
 
-*(At the end of this document there's an explanation on how to build a published presentation URL.)*
-
 Turn other assets `Off` until there's only two left. I suggest leaving the Clock.
 We need them to cycle so that the presentation updates are received.
 
