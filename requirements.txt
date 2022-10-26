@@ -1,3 +1,2 @@
-elevate
 requests
 PyYAML

@@ -8,11 +8,9 @@ import sys
 import tempfile
 import typing
 
-import elevate
 import requests
 import yaml
 
-elevate.elevate()
 MY_PATH = os.path.realpath(__file__)
 ARGS_REFRESH = ("/usr/bin/xdotool", "key", "ctrl+F5")
 ARGS_CEC_CLIENT = ("/usr/bin/cec-client", "-s")
@@ -37,7 +35,8 @@ class Session:
         return function
 
     def load_settings(self):
-        self.url = pathlib.Path("/root/mural-digital.txt").read_text().strip()
+        path = pathlib.Path(__file__).resolve().parent / "mural-digital.txt"
+        self.url = path.read_text().strip()
 
     @staticmethod
     def run_command_on():
