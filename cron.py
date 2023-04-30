@@ -26,7 +26,7 @@ class Session:
         if not function:
             print(f"Unknown command: {command}")
             sys.exit(1)
-        return function
+        return function()
 
     def run_command_on(self):
         # DISPLAY=:0 xdotool key 'ctrl+F5'
