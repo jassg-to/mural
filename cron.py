@@ -8,7 +8,6 @@ import sys
 import tempfile
 import typing
 
-import requests
 import yaml
 
 MY_PATH = os.path.realpath(__file__)
@@ -17,14 +16,9 @@ ARGS_CEC_CLIENT = ("/usr/bin/cec-client", "-s")
 
 
 class Session:
-    url = ""
+    path = pathlib.Path(__file__).resolve().parent / "config" / "schedule.yaml"
 
     def main(self):
-        command = self.parse_arguments()
-        self.load_settings()
-        command()
-
-    def parse_arguments(self) -> typing.Callable:
         parser = argparse.ArgumentParser()
         parser.add_argument("command", help="One of: on, off, schedule")
         command = parser.parse_args().command
@@ -34,12 +28,7 @@ class Session:
             sys.exit(1)
         return function
 
-    def load_settings(self):
-        path = pathlib.Path(__file__).resolve().parent / "mural-digital.txt"
-        self.url = path.read_text().strip()
-
-    @staticmethod
-    def run_command_on():
+    def run_command_on(self):
         # DISPLAY=:0 xdotool key 'ctrl+F5'
         # echo 'on 0' | cec-client -s
         subprocess.run(ARGS_CEC_CLIENT, input=b"on 0\n")
@@ -58,8 +47,7 @@ class Session:
             subprocess.run(["/usr/bin/crontab", file.name])
 
     def get_schedule(self) -> typing.Iterable[str]:
-        file_contents = requests.get(self.url).text
-        schedule = yaml.safe_load(file_contents)
+        schedule = yaml.safe_load(self.path.open())
 
         for weekday, items in schedule.items():
             for item in items:
