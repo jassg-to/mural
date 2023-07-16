@@ -3,7 +3,7 @@
 Perform these steps from a separate Windows, Mac or Linux computer.
 
 1. Buy Raspberry Pi kit. I bought a [CanaKit](https://canakit.com) model from Amazon.
-    ![Pi, power supply, HDMI cable, case, SD card.](img/kit.jpg)
+    ![Pi, power supply, HDMI cable, case, SD card.](kit.jpg)
 2. Download and install [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 3. Make sure the newly purchased SD card is connected to your computer. In Raspberry Pi Imager, select:
    1. **Choose OS**
@@ -42,7 +42,7 @@ Spambots are a real threat everywhere.
 ## Install the HDMI power schedule
 
 In order to save power and prevent volunteers from pulling the plug, we turn the screen off and on using a schedule.
-You can see a sample schedule file in the file [`schedule.yaml`](schedule.yaml).
+You can see a sample schedule file in the file [`schedule.yaml`](../content/schedule.yaml).
 
 1. [Connect to your Raspberry Pi via SSH.](https://www.google.com/search?q=how+to+ssh+into+raspberry+pi)
 2. Run the command `sudo raspi-config`

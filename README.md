@@ -1,10 +1,14 @@
 # Mural Digital
 
-This is mostly digital signage with
-[Google Slides](https://www.google.com/slides/about)
-and [FullPageOS](https://www.screenly.io),
-with some custom code to turn the TV on and off on a schedule, via HDMI.
+This is digital signage with raw images,
+with some info to turn the TV on and off on a schedule, via HDMI CEC.
 
-Follow installation instructions [here](INSTALL.md).
+Follow installation instructions [here](docs/INSTALL.md).
 
-To update the schedule, edit [schedule.yaml](schedule.yaml) and push the updates to git.
+To update the schedule,
+edit [schedule.yaml](content/schedule.yaml)
+and push the updates to git.
+
+To update the images,
+have "`page*.png``" files in the [content](content) folder
+and push the updates to git.

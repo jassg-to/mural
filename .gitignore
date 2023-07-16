@@ -1,8 +1,7 @@
-__pycache__
-/.idea
-/venv
-/client_secret.json
-/config
-/settings.yaml
 .DS_Store
-mural-digital.txt
+._*
+.idea/
+Desktop.ini
+Thumbs.db
+__pycache__/
+venv/
