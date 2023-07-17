@@ -23,11 +23,11 @@ class Slideshow:
         self.window.geometry("1072x603")
 
     def check_cron(self):
-        match self.cron.check():
-            case StateChange.turning_on:
-                self.index = 0
-            case StateChange.turning_off:
-                self.contents = sorted(CONTENT_PATH.glob("page*.png"))
+        state_change = self.cron.check()
+        if state_change == StateChange.turning_on:
+            self.index = 0
+        elif state_change == StateChange.turning_off:
+            self.contents = sorted(CONTENT_PATH.glob("page*.png"))
         self.window.after(773, self.check_cron)
 
     def show_next(self) -> None:
