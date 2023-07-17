@@ -2,14 +2,13 @@
 
 sudo apt install -y xinit ratpoison git python3-tk python3-pil.imagetk cec-utils
 
-cd
-PATH=$(find -name mural-digital | head 1)
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-ln -sf "$PATH/dotfiles/.ratpoisonrc" ~/
-ln -sf "$PATH/dotfiles/.xinitrc" ~/
+ln -sf "$SCRIPT_DIR/.ratpoisonrc" ~/
+ln -sf "$SCRIPT_DIR/.xinitrc" ~/
 cat >> ~/.bashrc <<EOF
 
-if PYTHONPATH="$PATH" bash "$PATH/dotfiles/tty1-guard.sh"; then
+if PYTHONPATH="$SCRIPT_DIR/.." bash "$SCRIPT_DIR/tty1-guard.sh"; then
   exit 1
 fi
 
