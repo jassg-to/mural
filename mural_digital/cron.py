@@ -9,7 +9,7 @@ import yaml
 from mural_digital import CONTENT_PATH, GIT_ROOT
 
 ARGS_CEC_CLIENT = ("/usr/bin/cec-client", "-s")
-SCHEDULE_PATH = CONTENT_PATH / "schedule.yaml"
+CONFIG_YAML_PATH = CONTENT_PATH / "config.yaml"
 
 
 class StateChange(enum.IntEnum):
@@ -18,9 +18,21 @@ class StateChange(enum.IntEnum):
     turning_off = 2
 
 
-class Cron:
+class Options(t.NamedTuple):
+    slide_time_seconds: int
+
+
+class CronShim:
     def __init__(self):
-        self.schedule = read_schedule()
+        self.options, self.schedule = read_config()
+
+    def check(self):
+        return StateChange.no_change
+
+
+class Cron(CronShim):
+    def __init__(self):
+        super().__init__()
         self.state = True
 
     def check(self) -> StateChange:
@@ -37,13 +49,22 @@ class Cron:
         else:
             subprocess.run(ARGS_CEC_CLIENT, input=b"standby 0\n")
             update_from_git()
+            self.options, self.schedule = read_config()
             return StateChange.turning_off
 
 
-def read_schedule() -> t.List[t.List[time]]:
+def read_config() -> t.Tuple[Options, t.List[t.List[time]]]:
+    with open(CONFIG_YAML_PATH) as f:
+        raw_config = yaml.safe_load(f)
+    options = Options(**raw_config["options"])
+    schedule = parse_schedule(raw_config["schedule"])
+    return options, schedule
+
+
+def parse_schedule(raw_schedule: t.Dict[str, t.List[str]]) -> t.List[t.List[time]]:
     weekdays = "Mon Tue Wed Thu Fri Sat Sun".split()
     result = [[] for _ in weekdays]
-    for weekday, times in yaml.safe_load(SCHEDULE_PATH.open()).items():
+    for weekday, times in raw_schedule.items():
         target = result[weekdays.index(weekday)]
         for item in times:
             match = re.match(r"^(\d+):(\d+)\s*-\s*(\d+):(\d+)$", item)

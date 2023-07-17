@@ -4,19 +4,20 @@ from unittest.mock import Mock
 
 from PIL import Image, ImageTk
 from mural_digital import CONTENT_PATH
-from mural_digital.cron import StateChange, Cron
+from mural_digital.cron import StateChange, CronShim
 
 
 class Slideshow:
-    def __init__(self, cron: Cron = None):
+    def __init__(self, cron: CronShim):
         self.window = tkinter.Tk()
         self.contents = sorted(CONTENT_PATH.glob("page*.png"))
         self.index = 0
         self.label: tkinter.Label = Mock()
         self.cron = cron
 
-        self.window.after(37, self.check_cron if cron else Mock())
-        self.window.after(101, self.show_next)
+        self._bind_keyboard_mouse()
+        self.window.after(37, self.check_cron)
+        self.after = self.window.after(101, self.show_next)
 
         # These lines below are irrelevant in ratpoison, they are only to help testing
         self.window.title("Slideshow")
@@ -37,17 +38,46 @@ class Slideshow:
         new_label.place(x=0, y=0)
         self.label.destroy()
         self.label = new_label
-        self.window.after(59879, self.show_next)
+        self.index = (self.index + 1) % len(self.contents)
+        self.after = self.window.after(self.cron.options.slide_time_seconds * 1000, self.show_next)
 
     def get_next_image_resized(self) -> Image:
-        image = Image.open(self.contents[self.index])
-        self.index = (self.index + 1) % len(self.contents)
-
         matches = re.finditer(r"\d+", self.window.geometry())
         width, height, *_ = (int(m.group(0)) for m in matches)
 
+        image = Image.open(self.contents[self.index])
         return image.resize((width, height))
+
+    def _bind_keyboard_mouse(self):
+        self.window.bind("<Escape>", lambda _: self.window.destroy())
+        self.window.bind("<Button-1>", self.prev_slide)  # left click
+        self.window.bind("<Button-3>", self.next_slide)  # right click
+        self.window.bind("<Left>", self.prev_slide)
+        self.window.bind("<Right>", self.next_slide)
+        self.window.bind("<Up>", self.prev_slide)
+        self.window.bind("<Down>", self.next_slide)
+        self.window.bind("<space>", self.next_slide)
+        self.window.bind("<Return>", self.next_slide)
+        self.window.bind("<BackSpace>", self.prev_slide)
+        self.window.bind("-", self.prev_slide)
+        self.window.bind(",", self.prev_slide)
+        self.window.bind(".", self.next_slide)
+        self.window.bind("[", self.prev_slide)
+        self.window.bind("]", self.next_slide)
+        self.window.bind("<Prior>", self.prev_slide)  # page up
+        self.window.bind("<Next>", self.next_slide)  # page down
+
+    def next_slide(self, _: tkinter.Event) -> None:
+        self.slide(1)
+
+    def prev_slide(self, _: tkinter.Event) -> None:
+        self.slide(-1)
+
+    def slide(self, move: int) -> None:
+        self.window.after_cancel(self.after)
+        self.index = (self.index + move - 1) % len(self.contents)
+        self.show_next()
 
 
 if __name__ == "__main__":
-    Slideshow(None).window.mainloop()
+    Slideshow(CronShim()).window.mainloop()

@@ -6,7 +6,7 @@ with some info to turn the TV on and off on a schedule, via HDMI CEC.
 Follow installation instructions [here](docs/INSTALL.md).
 
 To update the schedule,
-edit [schedule.yaml](content/schedule.yaml)
+edit [schedule.yaml](content/config.yaml)
 and push the updates to git.
 
 To update the images,

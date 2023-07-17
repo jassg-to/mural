@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-sudo apt install -y xinit ratpoison git python3-tk python3-pil.imagetk cec-utils
+sudo apt install -y xinit ratpoison git python3-tk python3-pil.imagetk python3-yaml cec-utils
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
