@@ -9,7 +9,7 @@ cd "$(dirname "$0")"/..
 git reset --hard HEAD
 git pull --ff-only
 
-PYTHONPATH=. startx -- -nocursor
+PYTHONPATH=. startx
 
 cat <<EOF
     ****************************************************************
