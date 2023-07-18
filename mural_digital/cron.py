@@ -1,12 +1,13 @@
 import enum
 import re
 import subprocess
+import sys
 import typing as t
 from bisect import bisect_right
 from datetime import datetime, time
 
 import yaml
-from mural_digital import CONTENT_PATH, GIT_ROOT
+from mural_digital import CONTENT_PATH
 
 ARGS_CEC_CLIENT = ("/usr/bin/cec-client", "-s")
 CONFIG_YAML_PATH = CONTENT_PATH / "config.yaml"
@@ -34,11 +35,16 @@ class Cron(CronShim):
     def __init__(self):
         super().__init__()
         self.state = True
+        self._current_weekday = datetime.now().weekday()
+        self._today_list = self.schedule[self._current_weekday]
 
     def check(self) -> StateChange:
         now = datetime.now()
-        today_list = self.schedule[now.weekday()]
-        current_spot = bisect_right(today_list, now.time())
+        weekday = now.weekday()
+        if weekday != self._current_weekday:
+            sys.exit(0)  # restart to pick up updates
+
+        current_spot = bisect_right(self._today_list, now.time())
         new_state = bool(current_spot % 2)
         if new_state == self.state:
             return StateChange.no_change
@@ -48,7 +54,6 @@ class Cron(CronShim):
             return StateChange.turning_on
         else:
             subprocess.run(ARGS_CEC_CLIENT, input=b"standby 0\n")
-            update_from_git()
             self.options, self.schedule = read_config()
             return StateChange.turning_off
 
@@ -72,8 +77,3 @@ def parse_schedule(raw_schedule: t.Dict[str, t.List[str]]) -> t.List[t.List[time
             target.append(time(hour1, minute1))
             target.append(time(hour2, minute2))
     return result
-
-
-def update_from_git():
-    subprocess.run(["/usr/bin/git", "reset", "--hard", "HEAD"], cwd=GIT_ROOT)
-    subprocess.run(["/usr/bin/git", "pull", "--ff-only"], cwd=GIT_ROOT)

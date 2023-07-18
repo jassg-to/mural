@@ -20,16 +20,14 @@ class Slideshow:
         self.window.after(37, self.check_cron)
         self.after = self.window.after(101, self.show_next)
 
-        # These lines below are irrelevant in ratpoison, they are only to help testing
+        # title and geometry are irrelevant in ratpoison, they are only to help testing
         self.window.title("Slideshow")
         self.window.geometry("1072x603")
 
     def check_cron(self):
         state_change = self.cron.check()
         if state_change == StateChange.turning_on:
-            self.index = 0
-        elif state_change == StateChange.turning_off:
-            self.contents = sorted(CONTENT_PATH.glob("page*.png"))
+            self.specific_slide(0)()
         self.window.after(773, self.check_cron)
 
     def show_next(self) -> None:
@@ -74,20 +72,20 @@ class Slideshow:
         for number in range(10):
             self.window.bind(str(number), self.specific_slide((number - 1) % 10))
 
-    def next_slide(self, _: tkinter.Event) -> None:
+    def next_slide(self, *_) -> None:
         self.window.after_cancel(self.after)
         self.show_next()
 
-    def prev_slide(self, event: tkinter.Event) -> None:
+    def prev_slide(self, *_) -> None:
         self.index -= 2
-        self.next_slide(event)
+        self.next_slide()
 
-    def specific_slide(self, number: int) -> t.Callable[[tkinter.Event], None]:
-        def inner(event: tkinter.Event) -> None:
+    def specific_slide(self, number: int) -> t.Callable[..., None]:
+        def to_specific_slide(*_) -> None:
             self.index = number
-            self.next_slide(event)
+            self.next_slide()
 
-        return inner
+        return to_specific_slide
 
 
 if __name__ == "__main__":
