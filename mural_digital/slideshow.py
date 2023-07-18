@@ -43,8 +43,6 @@ class Slideshow:
 
     def _build_window(self) -> tkinter.Tk:
         window = tkinter.Tk()
-
-        # Events
         window.configure(bg="black", cursor="none")
         window.after(10000, self.check_cron)
 
