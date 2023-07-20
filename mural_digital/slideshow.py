@@ -5,11 +5,11 @@ from unittest.mock import Mock
 
 from PIL import Image, ImageTk
 from mural_digital import CONTENT_PATH
-from mural_digital.cron import StateChange, CronShim
+from mural_digital.cron import StateChange, Cron
 
 
 class Slideshow:
-    def __init__(self, cron: CronShim):
+    def __init__(self, cron: Cron):
         self.window = self._build_window()
         self.after = self.window.after(23, self.show_next)
         self.contents = sorted(CONTENT_PATH.glob("page*.png"))
@@ -93,4 +93,4 @@ class Slideshow:
 
 
 if __name__ == "__main__":
-    Slideshow(CronShim()).window.mainloop()
+    Slideshow(Cron()).window.mainloop()

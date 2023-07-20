@@ -1,4 +1,4 @@
 from mural_digital.slideshow import Slideshow
-from mural_digital.cron import Cron
+from mural_digital.cron import CronWithHdmi
 
-Slideshow(Cron()).window.mainloop()
+Slideshow(CronWithHdmi()).window.mainloop()

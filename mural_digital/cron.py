@@ -20,50 +20,52 @@ class StateChange(enum.IntEnum):
 
 
 class Options(t.NamedTuple):
-    slide_time_seconds: int
+    slide_time_seconds: int = 30
 
 
-class CronShim:
+class Cron:
+    options: Options = Options()
+    current_weekday: int = datetime.now().weekday()
+    today_list: t.List[time] = []
+
     def __init__(self):
-        self.options, self.schedule = read_config()
+        self.read_config()
+        self.state = True
+
+    def read_config(self) -> None:
+        with open(CONFIG_YAML_PATH) as f:
+            raw_config = yaml.safe_load(f)
+        self.options = Options(**raw_config["options"])
+        schedule = parse_schedule(raw_config["schedule"])
+        self.today_list = schedule[self.current_weekday]
 
     def check(self):
-        return StateChange.no_change
-
-
-class Cron(CronShim):
-    def __init__(self):
-        super().__init__()
-        self.state = True
-        self._current_weekday = datetime.now().weekday()
-        self._today_list = self.schedule[self._current_weekday]
-
-    def check(self) -> StateChange:
         now = datetime.now()
         weekday = now.weekday()
-        if weekday != self._current_weekday:
+        if weekday != self.current_weekday:
             sys.exit(0)  # restart to pick up updates
 
-        current_spot = bisect_right(self._today_list, now.time())
+        now_time = now.time()
+        current_spot = bisect_right(self.today_list, now_time)
         new_state = bool(current_spot % 2)
         if new_state == self.state:
             return StateChange.no_change
         self.state = new_state
         if new_state:
-            subprocess.run(ARGS_CEC_CLIENT, input=b"on 0\n")
             return StateChange.turning_on
         else:
-            subprocess.run(ARGS_CEC_CLIENT, input=b"standby 0\n")
-            self.options, self.schedule = read_config()
+            self.read_config()
             return StateChange.turning_off
 
 
-def read_config() -> t.Tuple[Options, t.List[t.List[time]]]:
-    with open(CONFIG_YAML_PATH) as f:
-        raw_config = yaml.safe_load(f)
-    options = Options(**raw_config["options"])
-    schedule = parse_schedule(raw_config["schedule"])
-    return options, schedule
+class CronWithHdmi(Cron):
+    def check(self) -> StateChange:
+        state_change = super().check()
+        if state_change == StateChange.turning_on:
+            subprocess.run(ARGS_CEC_CLIENT, input=b"on 0\n")
+        elif state_change == StateChange.turning_off:
+            subprocess.run(ARGS_CEC_CLIENT, input=b"standby 0\n")
+        return state_change
 
 
 def parse_schedule(raw_schedule: t.Dict[str, t.List[str]]) -> t.List[t.List[time]]:
