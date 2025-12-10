@@ -22,11 +22,12 @@ The initial setup will go through several screens and reboot once or twice. This
 
 ## Configuration
 
-1. You should see a screen with a blue background and a terminal window. Just answer the questions.
-2. You will eventually see a prompt like this: `pi@raspberrypi:~ $`
+1. You should see a screen with a blue background and a terminal window. It will prompt you to create a username and password. Create them and remember them.
+2. You will eventually see a prompt like this: `raspberrypi login:`. Log in with the username and password you created.
 3. Type `sudo raspi-config` and press `Enter`. This will open a blue screen with a menu.
-4. Open `System Options` ▶ `Boot / Auto Login` ▶ `Console Autologin`.
-5. Open `Network Options` ▶ `Wi-Fi`. Select your Wi-Fi network and enter the password.
+5. Open `System Options` ▶ `Wireless LAN`. Enter your Wi-Fi network name (SSID) and passphrase.
+4. Open `System Options` ▶ `Boot` ▶ `Console Text console`.
+4. Open `System Options` ▶ `Auto Login` ▶ Yes.
 6. Open `Localisation Options` ▶ `Change Timezone`. Select the closest relevant location.
 7. This is a good opportunity to explore other administrative options, like SSH.
 8. Once you're done, select `Finish` and don't reboot yet.
