@@ -1,6 +1,6 @@
 [project]
 name = "mural_digital"
-version = "0.1.0"
+version = "2025.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"  # Debian Trixie comes with Python 3.13
@@ -9,5 +9,12 @@ dependencies = [
     "ruamel-yaml>=0.18.16",
 ]
 
+[project.scripts]
+mural-digital = "mural_digital.__main__:main"
+
 [tool.ruff]
 line-length = 120
+
+[build-system]
+requires = ["uv-build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"

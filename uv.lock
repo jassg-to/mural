@@ -5,7 +5,7 @@ requires-python = ">=3.13"
 [[package]]
 name = "mural-digital"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "pillow" },
     { name = "ruamel-yaml" },
