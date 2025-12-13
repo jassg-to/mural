@@ -4,8 +4,9 @@ import typing as t
 from unittest.mock import Mock
 
 from PIL import Image, ImageTk
+
 from mural_digital import CONTENT_PATH
-from mural_digital.cron import StateChange, Cron
+from mural_digital.cron import Cron, StateChange
 
 
 class Slideshow:
@@ -26,14 +27,14 @@ class Slideshow:
     def show_next(self) -> None:
         image = ImageTk.PhotoImage(self.get_next_image_resized())
         new_label = tkinter.Label(self.window, image=image)
-        new_label.image = image
+        new_label.image = image  # type: ignore
         new_label.place(x=0, y=0)
         self.label.destroy()
         self.label = new_label
         self.index += 1
         self.after = self.window.after(self.cron.options.slide_time_seconds * 1000, self.show_next)
 
-    def get_next_image_resized(self) -> Image:
+    def get_next_image_resized(self) -> Image.Image:
         matches = re.finditer(r"\d+", self.window.geometry())
         width, height, *_ = (int(m.group(0)) for m in matches)
 
@@ -53,6 +54,7 @@ class Slideshow:
         # Keyboard and mouse bindings
         window.bind("<Control-c>", lambda _: self.window.destroy())
         window.bind("<Alt-F4>", lambda _: self.window.destroy())
+        window.bind("<Escape>", lambda _: self.window.destroy())
         window.bind("<Button-1>", self.prev_slide)  # left mouse click
         window.bind("<Button-3>", self.next_slide)  # right mouse click
         window.bind("<Left>", self.prev_slide)

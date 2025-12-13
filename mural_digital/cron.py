@@ -6,11 +6,13 @@ import typing as t
 from bisect import bisect_right
 from datetime import datetime, time
 
-import yaml
+from ruamel.yaml import YAML
+
 from mural_digital import CONTENT_PATH
 
 ARGS_CEC_CLIENT = ("/usr/bin/cec-client", "-s")
 CONFIG_YAML_PATH = CONTENT_PATH / "config.yaml"
+yaml = YAML()
 
 
 class StateChange(enum.IntEnum):
@@ -34,7 +36,7 @@ class Cron:
 
     def read_config(self) -> None:
         with open(CONFIG_YAML_PATH) as f:
-            raw_config = yaml.safe_load(f)
+            raw_config = yaml.load(f)
         self.options = Options(**raw_config["options"])
         schedule = parse_schedule(raw_config["schedule"])
         self.today_list = schedule[self.current_weekday]
@@ -69,12 +71,13 @@ class CronWithHdmi(Cron):
 
 
 def parse_schedule(raw_schedule: t.Dict[str, t.List[str]]) -> t.List[t.List[time]]:
-    weekdays = "Mon Tue Wed Thu Fri Sat Sun".split()
+    weekdays: list[str] = "Mon Tue Wed Thu Fri Sat Sun".split()  # type: ignore
     result = [[] for _ in weekdays]
     for weekday, times in raw_schedule.items():
         target = result[weekdays.index(weekday)]
         for item in times:
             match = re.match(r"^(\d+):(\d+)\s*-\s*(\d+):(\d+)$", item)
+            assert match is not None, f"Bad time range: {item}"
             hour1, minute1, hour2, minute2 = map(int, match.groups())
             target.append(time(hour1, minute1))
             target.append(time(hour2, minute2))

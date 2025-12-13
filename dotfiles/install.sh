@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-sudo apt install -y xinit ratpoison git python3-tk python3-pil.imagetk python3-yaml cec-utils
+sudo apt install -y xinit ratpoison git cec-utils
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 

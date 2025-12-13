@@ -1,3 +1,3 @@
 
 ratpoison &
-exec python3 -m mural_digital
+exec uv run -m mural_digital
