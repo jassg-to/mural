@@ -1,6 +1,6 @@
 # Mural Digital
 
-A simple digital signage player built with [Fyne](https://fyne.io/). Cycles through images from the current folder.
+A simple digital signage player built with [Fyne](https://fyne.io/). Cycles through images in a `content/` subdirectory as a slideshow, optimized for low-memory devices like Raspberry Pi.
 
 ## Prerequisites
 
@@ -11,10 +11,37 @@ A simple digital signage player built with [Fyne](https://fyne.io/). Cycles thro
 
 ```bash
 go build .
+mkdir -p content
+# Place your .jpg / .jpeg / .png images in content/
 ./mural-digital
 ```
 
-Place image files (PNG, JPG, etc.) in the same directory as the executable and run it.
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-interval` | `30s` | Time between automatic slide transitions |
+
+```bash
+./mural-digital -interval 10s
+```
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Right arrow | Next slide |
+| Left arrow | Previous slide |
+| Home | First slide |
+| Esc | Quit |
+
+The window defaults to 800x450 and is resizable.
+
+## How It Works
+
+- Images are loaded from the `content/` directory in filename order.
+- Tiny thumbnails are pre-loaded at startup for instant keyboard navigation.
+- Full images are decoded and scaled to the window size on demand, keeping memory usage low.
 
 ## Development
 

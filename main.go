@@ -6,6 +6,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,9 +59,31 @@ func loadThumbnails(paths []string) []image.Image {
 		if err != nil {
 			continue // SVGs and unsupported formats get nil
 		}
-		thumbs[i] = resize.Resize(80, 0, src, resize.Lanczos3)
+		thumbs[i] = resize.Resize(48, 0, src, resize.Lanczos3)
 	}
 	return thumbs
+}
+
+func decodeAndFit(path string, width, height float32) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening image: %w", err)
+	}
+	defer f.Close()
+
+	src, _, err := image.Decode(f)
+	if err != nil {
+		return nil, fmt.Errorf("decoding image: %w", err)
+	}
+
+	bounds := src.Bounds()
+	imgW := float64(bounds.Dx())
+	imgH := float64(bounds.Dy())
+	scale := math.Min(float64(width)/imgW, float64(height)/imgH)
+	targetW := uint(math.Round(imgW * scale))
+	targetH := uint(math.Round(imgH * scale))
+
+	return resize.Resize(targetW, targetH, src, resize.Lanczos3), nil
 }
 
 func main() {
@@ -86,52 +109,55 @@ func main() {
 
 	bg := canvas.NewRectangle(color.Black)
 	current := 0
-	img := canvas.NewImageFromFile(paths[current])
+	img := canvas.NewImageFromImage(thumbnails[current])
 	img.FillMode = canvas.ImageFillContain
 	w.SetContent(container.NewStack(bg, img))
 
+	winSize := w.Canvas().Size
 	var generation atomic.Int64
-
-	show := func(index int) {
-		generation.Add(1)
-		current = index
-		img.Image = nil
-		img.File = paths[current]
-		img.Refresh()
-	}
 
 	showFast := func(index int) {
 		current = index
 		gen := generation.Add(1)
 		if thumbnails[index] != nil {
-			img.File = ""
 			img.Image = thumbnails[index]
 			img.Refresh()
-			go func() {
+		}
+		go func() {
+			if generation.Load() != gen {
+				return
+			}
+			sz := winSize()
+			fitted, err := decodeAndFit(paths[index], sz.Width, sz.Height)
+			if err != nil || generation.Load() != gen {
+				return
+			}
+			fyne.Do(func() {
 				if generation.Load() != gen {
 					return
 				}
-				fyne.Do(func() {
-					if generation.Load() != gen {
-						return
-					}
-					img.Image = nil
-					img.File = paths[index]
-					img.Refresh()
-				})
-			}()
-		} else {
-			img.Image = nil
-			img.File = paths[index]
-			img.Refresh()
-		}
+				img.Image = fitted
+				img.Refresh()
+			})
+		}()
 	}
+
+	showFast(current)
 
 	ticker := time.NewTicker(*interval)
 	go func() {
 		for range ticker.C {
+			idx := (current + 1) % len(paths)
+			sz := winSize()
+			fitted, err := decodeAndFit(paths[idx], sz.Width, sz.Height)
+			if err != nil {
+				continue
+			}
 			fyne.Do(func() {
-				show((current + 1) % len(paths))
+				generation.Add(1)
+				current = idx
+				img.Image = fitted
+				img.Refresh()
 			})
 		}
 	}()
