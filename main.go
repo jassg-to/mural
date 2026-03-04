@@ -3,9 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"image/color"
@@ -14,15 +18,13 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"github.com/nfnt/resize"
 )
 
 var imageExts = map[string]bool{
 	".jpg":  true,
 	".jpeg": true,
 	".png":  true,
-	".gif":  true,
-	".bmp":  true,
-	".svg":  true,
 }
 
 func loadImagePaths(dir string) ([]string, error) {
@@ -44,6 +46,23 @@ func loadImagePaths(dir string) ([]string, error) {
 	return paths, nil
 }
 
+func loadThumbnails(paths []string) []image.Image {
+	thumbs := make([]image.Image, len(paths))
+	for i, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		src, _, err := image.Decode(f)
+		f.Close()
+		if err != nil {
+			continue // SVGs and unsupported formats get nil
+		}
+		thumbs[i] = resize.Resize(80, 0, src, resize.Lanczos3)
+	}
+	return thumbs
+}
+
 func main() {
 	interval := flag.Duration("interval", 30*time.Second, "time between slides")
 	flag.Parse()
@@ -58,6 +77,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	thumbnails := loadThumbnails(paths)
+
 	a := app.New()
 	w := a.NewWindow("Mural Digital")
 	w.Resize(fyne.NewSize(800, 450))
@@ -69,16 +90,49 @@ func main() {
 	img.FillMode = canvas.ImageFillContain
 	w.SetContent(container.NewStack(bg, img))
 
+	var generation atomic.Int64
+
 	show := func(index int) {
+		generation.Add(1)
 		current = index
+		img.Image = nil
 		img.File = paths[current]
 		img.Refresh()
+	}
+
+	showFast := func(index int) {
+		current = index
+		gen := generation.Add(1)
+		if thumbnails[index] != nil {
+			img.File = ""
+			img.Image = thumbnails[index]
+			img.Refresh()
+			go func() {
+				if generation.Load() != gen {
+					return
+				}
+				fyne.Do(func() {
+					if generation.Load() != gen {
+						return
+					}
+					img.Image = nil
+					img.File = paths[index]
+					img.Refresh()
+				})
+			}()
+		} else {
+			img.Image = nil
+			img.File = paths[index]
+			img.Refresh()
+		}
 	}
 
 	ticker := time.NewTicker(*interval)
 	go func() {
 		for range ticker.C {
-			show((current + 1) % len(paths))
+			fyne.Do(func() {
+				show((current + 1) % len(paths))
+			})
 		}
 	}()
 
@@ -87,13 +141,13 @@ func main() {
 		case fyne.KeyEscape:
 			a.Quit()
 		case fyne.KeyRight:
-			show((current + 1) % len(paths))
+			showFast((current + 1) % len(paths))
 			ticker.Reset(*interval)
 		case fyne.KeyLeft:
-			show((current - 1 + len(paths)) % len(paths))
+			showFast((current - 1 + len(paths)) % len(paths))
 			ticker.Reset(*interval)
 		case fyne.KeyHome:
-			show(0)
+			showFast(0)
 			ticker.Reset(*interval)
 		}
 	})
