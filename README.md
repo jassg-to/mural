@@ -32,6 +32,7 @@ mkdir -p content
 |------|---------|-------------|
 | `-interval` | `30s` | Time between automatic slide transitions |
 | `-content` | `content` | Directory containing images and `schedule.toml` |
+| `-thumb-width` | `80` | Thumbnail width in pixels |
 
 ```bash
 ./mural -interval 10s -content /var/mural
@@ -43,7 +44,7 @@ mkdir -p content
 |-----|--------|
 | Right arrow | Next slide |
 | Left arrow | Previous slide |
-| Home | First slide |
+| Home | Rescan content directory and show first slide |
 | Delete | Pause (black screen) |
 | Esc | Quit |
 
@@ -89,7 +90,7 @@ windows    = [{ on = "07:00", off = "20:00" }]
 ## How It Works
 
 - Images are loaded from the content directory in filename order. Only changed files are re-decoded on reload.
-- Tiny thumbnails (48px) are pre-loaded for instant keyboard navigation; full images are decoded on demand and scaled to the window.
+- Tiny thumbnails (default 80px, configurable via `-thumb-width`) are pre-loaded for instant keyboard navigation; full images are decoded on demand and scaled to the window.
 - A generation counter prevents stale background loads from overwriting a newer slide.
 - All UI updates from background goroutines go through `fyne.Do()`.
 - The scheduler sleeps until the next event each day; CEC commands run via `cec-client -s`.
