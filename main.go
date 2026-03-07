@@ -3,19 +3,25 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
 
 func main() {
-	interval     := flag.Duration("interval", 30*time.Second, "time between slides")
+	interval := flag.Duration("interval", 30*time.Second, "time between slides")
 	scheduleFile := flag.String("schedule", "schedule.toml", "schedule config file")
 	flag.Parse()
 
 	cec := NewCEC()
 	ss := NewSlideshow("content", *interval)
+	ss.SetOnResume(func() {
+		if err := cec.TurnOn(); err != nil {
+			log.Printf("CEC TurnOn (manual resume): %v", err)
+		}
+	})
 
-	sched, err := LoadSchedule(*scheduleFile, cec, ss.Reload)
+	sched, err := LoadSchedule(*scheduleFile, cec, ss.Reload, ss.Pause)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading schedule: %v\n", err)
 		os.Exit(1)

@@ -91,21 +91,56 @@ type Slideshow struct {
 	interval time.Duration
 
 	// fields below are set during Run and accessed only on the Fyne main goroutine,
-	// except via Reload which marshals through fyne.Do.
+	// except via Pause/Reload which marshal through fyne.Do.
 	paths      []string
 	thumbnails []image.Image
 	current    int
+	paused     bool
 	generation atomic.Int64
 	img        *canvas.Image
 	ticker     *time.Ticker
 	winSize    func() fyne.Size
+
+	// onResume is called (in a goroutine) when the user manually resumes from pause.
+	onResume func()
 }
 
 func NewSlideshow(dir string, interval time.Duration) *Slideshow {
 	return &Slideshow{dir: dir, interval: interval}
 }
 
-// Reload rescans the content directory and resets the slideshow to slide 0.
+// SetOnResume sets a callback invoked when the user presses a key to wake the display.
+// Intended for CEC TurnOn. Safe to call before Run.
+func (s *Slideshow) SetOnResume(f func()) { s.onResume = f }
+
+// Pause stops the slideshow and blacks out the display.
+// Safe to call from any goroutine.
+func (s *Slideshow) Pause() {
+	fyne.Do(func() {
+		s.paused = true
+		s.generation.Add(1) // cancel any in-flight background load
+		if s.ticker != nil {
+			s.ticker.Stop()
+		}
+		if s.img != nil {
+			s.img.Image = nil
+			s.img.Refresh()
+		}
+	})
+}
+
+// resume un-pauses. Must be called from the Fyne main goroutine.
+func (s *Slideshow) resume() {
+	s.paused = false
+	if s.ticker != nil {
+		s.ticker.Reset(s.interval)
+	}
+	if s.img != nil {
+		s.showFast(s.current)
+	}
+}
+
+// Reload rescans the content directory, resets to slide 0, and un-pauses.
 // Safe to call from any goroutine.
 func (s *Slideshow) Reload() {
 	paths, err := loadImagePaths(s.dir)
@@ -121,12 +156,8 @@ func (s *Slideshow) Reload() {
 	fyne.Do(func() {
 		s.paths = paths
 		s.thumbnails = thumbs
-		if s.ticker != nil {
-			s.ticker.Reset(s.interval)
-		}
-		if s.img != nil {
-			s.showFast(0)
-		}
+		s.current = 0
+		s.resume()
 	})
 }
 
@@ -190,6 +221,9 @@ func (s *Slideshow) Run() error {
 	go func() {
 		for range s.ticker.C {
 			fyne.Do(func() {
+				if s.paused {
+					return
+				}
 				idx := (s.current + 1) % len(s.paths)
 				sz := s.winSize()
 				fitted, err := decodeAndFit(s.paths[idx], sz.Width, sz.Height)
@@ -205,10 +239,20 @@ func (s *Slideshow) Run() error {
 	}()
 
 	w.Canvas().SetOnTypedKey(func(ev *fyne.KeyEvent) {
+		if ev.Name == fyne.KeyEscape {
+			a.Quit()
+			return
+		}
+		if s.paused {
+			// Any nav key wakes the display.
+			if s.onResume != nil {
+				go s.onResume() // CEC TurnOn; run in goroutine as it's slow
+			}
+			s.resume()
+			// fall through so the key also performs its nav action
+		}
 		n := len(s.paths)
 		switch ev.Name {
-		case fyne.KeyEscape:
-			a.Quit()
 		case fyne.KeyRight:
 			s.showFast((s.current + 1) % n)
 			s.ticker.Reset(s.interval)

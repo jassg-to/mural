@@ -68,14 +68,16 @@ type event struct {
 
 // Schedule fires CEC on/off commands according to a TOML config file.
 type Schedule struct {
-	cfg      ScheduleConfig
-	cec      *CEC
-	onTurnOn func()
+	cfg       ScheduleConfig
+	cec       *CEC
+	onTurnOn  func()
+	onTurnOff func()
 }
 
 // LoadSchedule parses the TOML file at path and returns a Schedule.
-// onTurnOn is called at every turn-on event (before CEC TurnOn).
-func LoadSchedule(path string, cec *CEC, onTurnOn func()) (*Schedule, error) {
+// onTurnOn is called before CEC TurnOn (use ss.Reload to reload content and un-pause).
+// onTurnOff is called before CEC TurnOff (use ss.Pause to blank the display).
+func LoadSchedule(path string, cec *CEC, onTurnOn func(), onTurnOff func()) (*Schedule, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading schedule: %w", err)
@@ -84,7 +86,7 @@ func LoadSchedule(path string, cec *CEC, onTurnOn func()) (*Schedule, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing schedule: %w", err)
 	}
-	return &Schedule{cfg: cfg, cec: cec, onTurnOn: onTurnOn}, nil
+	return &Schedule{cfg: cfg, cec: cec, onTurnOn: onTurnOn, onTurnOff: onTurnOff}, nil
 }
 
 // Start launches a background goroutine that fires CEC commands at the scheduled times.
@@ -113,6 +115,7 @@ func (s *Schedule) Start() {
 						log.Printf("schedule: CEC TurnOn: %v", err)
 					}
 				} else {
+					s.onTurnOff()
 					if err := s.cec.TurnOff(); err != nil {
 						log.Printf("schedule: CEC TurnOff: %v", err)
 					}
