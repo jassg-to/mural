@@ -27,40 +27,67 @@ var imageExts = map[string]bool{
 	".png":  true,
 }
 
-func loadImagePaths(dir string) ([]string, error) {
+// Slide holds a content image path along with its cached thumbnail and the
+// file stats used to detect whether the image has changed since last load.
+type Slide struct {
+	path  string
+	thumb image.Image
+	size  int64
+	mtime time.Time
+}
+
+func loadThumbnail(path string) image.Image {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	src, _, err := image.Decode(f)
+	f.Close()
+	if err != nil {
+		return nil
+	}
+	return resize.Resize(48, 0, src, resize.Lanczos3)
+}
+
+// scanSlides scans dir for images and returns a []Slide. existing slides whose
+// path, size, and mtime are unchanged are reused as-is (thumbnail not reloaded).
+func scanSlides(dir string, existing []Slide) ([]Slide, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading content directory: %w", err)
 	}
 
-	var paths []string
+	prev := make(map[string]Slide, len(existing))
+	for _, sl := range existing {
+		prev[sl.path] = sl
+	}
+
+	var slides []Slide
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(e.Name()))
-		if imageExts[ext] {
-			paths = append(paths, filepath.Join(dir, e.Name()))
+		if !imageExts[ext] {
+			continue
 		}
-	}
-	return paths, nil
-}
-
-func loadThumbnails(paths []string) []image.Image {
-	thumbs := make([]image.Image, len(paths))
-	for i, p := range paths {
-		f, err := os.Open(p)
+		path := filepath.Join(dir, e.Name())
+		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		src, _, err := image.Decode(f)
-		f.Close()
-		if err != nil {
+		if old, ok := prev[path]; ok && old.size == info.Size() && old.mtime.Equal(info.ModTime()) {
+			slides = append(slides, old)
 			continue
 		}
-		thumbs[i] = resize.Resize(48, 0, src, resize.Lanczos3)
+		slides = append(slides, Slide{
+			path:  path,
+			thumb: loadThumbnail(path),
+			size:  info.Size(),
+			mtime: info.ModTime(),
+		})
 	}
-	return thumbs
+	return slides, nil
 }
 
 func decodeAndFit(path string, width, height float32) (image.Image, error) {
@@ -92,8 +119,7 @@ type Slideshow struct {
 
 	// fields below are set during Run and accessed only on the Fyne main goroutine,
 	// except via Pause/Reload which marshal through fyne.Do.
-	paths      []string
-	thumbnails []image.Image
+	slides     []Slide
 	current    int
 	paused     bool
 	generation atomic.Int64
@@ -143,19 +169,25 @@ func (s *Slideshow) resume() {
 // Reload rescans the content directory, resets to slide 0, and un-pauses.
 // Safe to call from any goroutine.
 func (s *Slideshow) Reload() {
-	paths, err := loadImagePaths(s.dir)
+	// Snapshot current slides on the main goroutine so scanSlides can reuse
+	// unchanged entries without a lock.
+	var existing []Slide
+	fyne.Do(func() {
+		existing = make([]Slide, len(s.slides))
+		copy(existing, s.slides)
+	})
+
+	slides, err := scanSlides(s.dir, existing)
 	if err != nil {
 		log.Printf("slideshow reload: %v", err)
 		return
 	}
-	if len(paths) == 0 {
+	if len(slides) == 0 {
 		log.Printf("slideshow reload: no images found in %s", s.dir)
 		return
 	}
-	thumbs := loadThumbnails(paths)
 	fyne.Do(func() {
-		s.paths = paths
-		s.thumbnails = thumbs
+		s.slides = slides
 		s.current = 0
 		s.resume()
 	})
@@ -165,18 +197,18 @@ func (s *Slideshow) Reload() {
 func (s *Slideshow) showFast(index int) {
 	s.current = index
 	gen := s.generation.Add(1)
-	if s.thumbnails[index] != nil {
-		s.img.Image = s.thumbnails[index]
+	if s.slides[index].thumb != nil {
+		s.img.Image = s.slides[index].thumb
 		s.img.Refresh()
 	}
-	paths := s.paths
+	path := s.slides[index].path
 	winSize := s.winSize
 	go func() {
 		if s.generation.Load() != gen {
 			return
 		}
 		sz := winSize()
-		fitted, err := decodeAndFit(paths[index], sz.Width, sz.Height)
+		fitted, err := decodeAndFit(path, sz.Width, sz.Height)
 		if err != nil || s.generation.Load() != gen {
 			return
 		}
@@ -192,16 +224,15 @@ func (s *Slideshow) showFast(index int) {
 
 // Run loads images, opens the window, and blocks until the user quits.
 func (s *Slideshow) Run() error {
-	paths, err := loadImagePaths(s.dir)
+	slides, err := scanSlides(s.dir, nil)
 	if err != nil {
 		return err
 	}
-	if len(paths) == 0 {
+	if len(slides) == 0 {
 		return fmt.Errorf("no images found in %s", s.dir)
 	}
 
-	s.paths = paths
-	s.thumbnails = loadThumbnails(paths)
+	s.slides = slides
 
 	a := app.New()
 	w := a.NewWindow("Mural Digital")
@@ -209,7 +240,7 @@ func (s *Slideshow) Run() error {
 	w.SetPadded(false)
 
 	bg := canvas.NewRectangle(color.Black)
-	s.img = canvas.NewImageFromImage(s.thumbnails[0])
+	s.img = canvas.NewImageFromImage(s.slides[0].thumb)
 	s.img.FillMode = canvas.ImageFillContain
 	w.SetContent(container.NewStack(bg, s.img))
 
@@ -224,9 +255,9 @@ func (s *Slideshow) Run() error {
 				if s.paused {
 					return
 				}
-				idx := (s.current + 1) % len(s.paths)
+				idx := (s.current + 1) % len(s.slides)
 				sz := s.winSize()
-				fitted, err := decodeAndFit(s.paths[idx], sz.Width, sz.Height)
+				fitted, err := decodeAndFit(s.slides[idx].path, sz.Width, sz.Height)
 				if err != nil {
 					return
 				}
@@ -251,7 +282,7 @@ func (s *Slideshow) Run() error {
 			s.resume()
 			// fall through so the key also performs its nav action
 		}
-		n := len(s.paths)
+		n := len(s.slides)
 		switch ev.Name {
 		case fyne.KeyRight:
 			s.showFast((s.current + 1) % n)
