@@ -9,7 +9,7 @@ CURRENT_USER=$(id -un)
 # ── 1. System packages ────────────────────────────────────────────────────────
 echo "Installing system packages..."
 sudo apt update
-sudo apt install -y xinit ratpoison cec-utils libgl1 unclutter
+sudo apt install -y xinit ratpoison cec-utils libgl1 unclutter x11-xserver-utils
 
 # ── 2. Binary from GitHub Releases ───────────────────────────────────────────
 ARCH=$(uname -m)
@@ -34,6 +34,10 @@ set border 0
 EOF
 
 cat > "$HOME/.xinitrc" <<'EOF'
+xset s off
+xset -dpms
+xset s noblank
+
 ratpoison &
 unclutter -idle 0 -root &
 cd ~/mural
