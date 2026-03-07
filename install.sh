@@ -9,7 +9,7 @@ CURRENT_USER=$(id -un)
 # ── 1. System packages ────────────────────────────────────────────────────────
 echo "Installing system packages..."
 sudo apt update
-sudo apt install -y xinit ratpoison cec-utils libgl1
+sudo apt install -y xinit ratpoison cec-utils libgl1 unclutter
 
 # ── 2. Binary from GitHub Releases ───────────────────────────────────────────
 ARCH=$(uname -m)
@@ -35,6 +35,7 @@ EOF
 
 cat > "$HOME/.xinitrc" <<'EOF'
 ratpoison &
+unclutter -idle 0 -root &
 cd ~/mural
 exec ./mural
 EOF
@@ -151,9 +152,9 @@ case "${response,,}" in
    force user = ${CURRENT_USER}
    valid users = ${CURRENT_USER}
 SAMBAEOF
-
-      sudo systemctl restart smbd
     fi
+
+    sudo systemctl restart smbd nmbd
 
     echo ""
     echo "Samba share ready. Access from your computer:"
