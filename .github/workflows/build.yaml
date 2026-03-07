@@ -1,38 +1,59 @@
-name: Release
+name: Build
 
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      amd64:
+        description: Build linux/amd64
+        type: boolean
+        default: false
+      arm64:
+        description: Build linux/arm64
+        type: boolean
+        default: true
+      arm:
+        description: Build linux/arm (v7)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            # Tag push — build all targets
+            echo 'matrix={"include":[{"suffix":"amd64","goarch":"amd64"},{"suffix":"arm64","goarch":"arm64","dpkg_arch":"arm64","cross_cc":"aarch64-linux-gnu-gcc","cross_pkg":"gcc-aarch64-linux-gnu","pkg_config_path":"/usr/lib/aarch64-linux-gnu/pkgconfig"},{"suffix":"arm","goarch":"arm","goarm":"7","dpkg_arch":"armhf","cross_cc":"arm-linux-gnueabihf-gcc","cross_pkg":"gcc-arm-linux-gnueabihf","pkg_config_path":"/usr/lib/arm-linux-gnueabihf/pkgconfig"}]}' >> "$GITHUB_OUTPUT"
+          else
+            # Manual dispatch — build selected targets
+            include='[]'
+            if [[ "${{ inputs.amd64 }}" == "true" ]]; then
+              include=$(echo "$include" | jq -c '. + [{"suffix":"amd64","goarch":"amd64"}]')
+            fi
+            if [[ "${{ inputs.arm64 }}" == "true" ]]; then
+              include=$(echo "$include" | jq -c '. + [{"suffix":"arm64","goarch":"arm64","dpkg_arch":"arm64","cross_cc":"aarch64-linux-gnu-gcc","cross_pkg":"gcc-aarch64-linux-gnu","pkg_config_path":"/usr/lib/aarch64-linux-gnu/pkgconfig"}]')
+            fi
+            if [[ "${{ inputs.arm }}" == "true" ]]; then
+              include=$(echo "$include" | jq -c '. + [{"suffix":"arm","goarch":"arm","goarm":"7","dpkg_arch":"armhf","cross_cc":"arm-linux-gnueabihf-gcc","cross_pkg":"gcc-arm-linux-gnueabihf","pkg_config_path":"/usr/lib/arm-linux-gnueabihf/pkgconfig"}]')
+            fi
+            echo "matrix={\"include\":$include}" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: prepare
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - suffix: amd64
-            goarch: amd64
-
-          - suffix: arm64
-            goarch: arm64
-            dpkg_arch: arm64
-            cross_cc: aarch64-linux-gnu-gcc
-            cross_pkg: gcc-aarch64-linux-gnu
-            pkg_config_path: /usr/lib/aarch64-linux-gnu/pkgconfig
-
-          - suffix: arm
-            goarch: arm
-            goarm: "7"
-            dpkg_arch: armhf
-            cross_cc: arm-linux-gnueabihf-gcc
-            cross_pkg: gcc-arm-linux-gnueabihf
-            pkg_config_path: /usr/lib/arm-linux-gnueabihf/pkgconfig
-
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
 
@@ -96,6 +117,7 @@ jobs:
           path: mural_linux_${{ matrix.suffix }}
 
   release:
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-24.04
     steps:
