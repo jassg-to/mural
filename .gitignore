@@ -1,7 +1,8 @@
 .DS_Store
 ._*
-.idea/
+.claude
 Desktop.ini
 Thumbs.db
-__pycache__/
-venv/
+mural-digital
+mural-digital.exe
+content/
