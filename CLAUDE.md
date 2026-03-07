@@ -15,8 +15,11 @@ Simple digital signage player that cycles through images in a `content/` subdire
 - `slideshow.go` — `Slideshow` struct; image loading, display, pause/resume
 - `cec.go` — `CEC` struct; wraps `cec-client` CLI for HDMI display control
 - `schedule.go` — `Schedule` struct; TOML-driven daily on/off scheduler
-- `schedule.toml` — runtime schedule config (not committed; `.gitignore`d)
-- `content/` — runtime image directory (not committed; `.gitignore`d)
+- `install.sh` — one-line installer for Raspberry Pi (downloads binary, installs deps, writes dotfiles)
+- `docs/INSTALL.md` — step-by-step Raspberry Pi setup guide (from imaging the SD card to running)
+- `docs/kit.jpg` — photo of recommended hardware kit
+- `.github/workflows/release.yaml` — CI: cross-compiles linux/amd64, arm64, arm on tag push; publishes GitHub Release
+- `content/` — runtime image directory and `schedule.toml` (not committed; `.gitignore`d)
 - `go.mod` / `go.sum` — Go module dependencies
 - `mise.toml` — mise tool versions
 
@@ -48,11 +51,18 @@ Simple digital signage player that cycles through images in a `content/` subdire
 - All off-main-thread UI updates go through `fyne.Do()`.
 - Supported formats: JPG, JPEG, PNG.
 - `Schedule` sleeps until each event; at turn-on it calls `ss.Reload` then `cec.TurnOn`; at turn-off it calls `ss.Pause` then `cec.TurnOff`.
-- `Slideshow.Pause()` blacks the screen and stops the ticker. Any nav key resumes (calls `onResume` → CEC TurnOn in a goroutine, then restarts the ticker).
+- `Slideshow.Pause()` blacks the screen and stops the ticker. Any nav key resumes (calls `onResume` → CEC TurnOn in a goroutine, then restarts the ticker). Delete key manually pauses (simulates schedule off).
 - `cec.go` wraps `cec-client -s -d 1`; graceful no-op if `cec-client` is not in `$PATH`.
+- The schedule file is auto-reloaded daily at a configurable time (default 01:00). `[[special]]` rules match an Nth weekday of the month and union their windows with the regular weekday windows.
+
+## Deployment
+
+- Pre-built Linux binaries (amd64, arm64, armv7) are published as GitHub Releases on every tag push.
+- `install.sh` is a curl-pipe-bash installer: installs system packages, downloads the latest release binary, writes X11/ratpoison dotfiles, creates `~/mural-digital/content/` with a sample schedule, and optionally configures systemd autologin for kiosk mode.
+- `docs/INSTALL.md` covers the full Raspberry Pi journey from hardware purchase through first boot.
 
 ## Conventions
 
 - Keep it simple — this is a single-purpose signage player.
 - Target platform is Linux but we want to support Windows too.
-- Images are loaded from `content/` subdirectory at runtime.
+- Images are loaded from the content directory at runtime (default `content/`, configurable via `-content` flag).

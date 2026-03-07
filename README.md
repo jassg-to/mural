@@ -1,10 +1,18 @@
 # Mural Digital
 
-A digital signage player built with [Fyne](https://fyne.io/). Cycles through images in a `content/` subdirectory, with a daily schedule for display on/off times and HDMI CEC control. Optimized for Raspberry Pi.
+A digital signage player built with [Fyne](https://fyne.io/). Cycles through images in a content directory, with a daily schedule for display on/off times and HDMI CEC control. Optimized for Raspberry Pi.
+
+## Quick Install (Raspberry Pi)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jassg-to/mural-digital/main/install.sh | bash
+```
+
+This downloads the latest pre-built binary, installs dependencies, and sets up the display environment. See [docs/INSTALL.md](docs/INSTALL.md) for the full step-by-step guide starting from hardware setup.
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.25+ (only needed if building from source)
 - GCC (for CGo/Fyne) — on Windows, install via [MSYS2](https://www.msys2.org/) or [TDM-GCC](https://jmeubank.github.io/tdm-gcc/)
 - `cec-client` on the PATH for HDMI CEC control (optional; no-op if absent)
 
@@ -14,8 +22,7 @@ A digital signage player built with [Fyne](https://fyne.io/). Cycles through ima
 go build .
 mkdir -p content
 # Place your .jpg / .jpeg / .png images in content/
-# Copy and edit the schedule (see below)
-cp schedule.toml.example content/schedule.toml
+# Create a schedule (see below)
 ./mural-digital
 ```
 
@@ -37,15 +44,16 @@ cp schedule.toml.example content/schedule.toml
 | Right arrow | Next slide |
 | Left arrow | Previous slide |
 | Home | First slide |
+| Delete | Pause (black screen) |
 | Esc | Quit |
 
-When the display is paused (scheduled off-time), any nav key wakes it immediately.
+When the display is paused (scheduled off-time or Delete key), any nav key wakes it immediately.
 
-The window defaults to 800x450 and is resizable.
+The window defaults to 800x450 and is resizable. Ratpoison will automatically fit it to screen.
 
 ## Schedule
 
-Create a `content/schedule.toml` to control daily on/off windows:
+Create a `schedule.toml` inside your content directory to control daily on/off windows:
 
 ```toml
 reload_time = "01:00"  # reload this file daily at this time (HH:MM; default: "01:00")
@@ -73,13 +81,15 @@ windows    = [{ on = "07:00", off = "20:00" }]
 ```
 
 - Each day has a list of `{ on, off }` windows in `HH:MM` (local time).
-- `[[special]]` rules match an Nth weekday of the month and add extra on-time (union).
-- At each turn-on event, the `content/` directory is rescanned for new or changed images.
+- `[[special]]` rules match an Nth weekday of the month and add extra on-time (union with the regular weekday windows).
+- Overlapping windows are merged automatically.
+- The schedule file is re-read from disk daily at `reload_time` — edit it without restarting.
+- At each turn-on event, the content directory is rescanned for new or changed images.
 
 ## How It Works
 
-- Images are loaded from `content/` in filename order. Only changed files are re-decoded on reload.
-- Tiny thumbnails (48px) are pre-loaded for instant keyboard navigation; full images are decoded on demand.
+- Images are loaded from the content directory in filename order. Only changed files are re-decoded on reload.
+- Tiny thumbnails (48px) are pre-loaded for instant keyboard navigation; full images are decoded on demand and scaled to the window.
 - A generation counter prevents stale background loads from overwriting a newer slide.
 - All UI updates from background goroutines go through `fyne.Do()`.
 - The scheduler sleeps until the next event each day; CEC commands run via `cec-client -s`.
@@ -90,4 +100,4 @@ windows    = [{ on = "07:00", off = "20:00" }]
 go run .
 ```
 
-> **Note:** The first build takes a long time (10–20 min on Windows) due to Fyne's CGo compilation. Subsequent builds are fast thanks to the build cache.
+> **Note:** The first build takes a long time (10-20 min on Windows) due to Fyne's CGo compilation. Subsequent builds are fast thanks to the build cache.
