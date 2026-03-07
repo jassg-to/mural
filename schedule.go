@@ -68,20 +68,19 @@ type event struct {
 	turnOn bool
 }
 
-// Schedule fires CEC on/off commands according to a TOML config file.
+// Schedule fires on/off commands according to a TOML config file.
 type Schedule struct {
 	path      string
 	cfg       ScheduleConfig
 	mu        sync.RWMutex
-	cec       *CEC
 	onTurnOn  func()
 	onTurnOff func()
 }
 
 // LoadSchedule parses the TOML file at path and returns a Schedule.
-// onTurnOn is called before CEC TurnOn (use ss.Reload to reload content and un-pause).
-// onTurnOff is called before CEC TurnOff (use ss.Pause to blank the display).
-func LoadSchedule(path string, cec *CEC, onTurnOn func(), onTurnOff func()) (*Schedule, error) {
+// onTurnOn is called at scheduled turn-on (use ss.Reload to reload content and un-pause).
+// onTurnOff is called at scheduled turn-off (use ss.Pause to blank the display).
+func LoadSchedule(path string, onTurnOn func(), onTurnOff func()) (*Schedule, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading schedule: %w", err)
@@ -90,7 +89,7 @@ func LoadSchedule(path string, cec *CEC, onTurnOn func(), onTurnOff func()) (*Sc
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing schedule: %w", err)
 	}
-	return &Schedule{path: path, cfg: cfg, cec: cec, onTurnOn: onTurnOn, onTurnOff: onTurnOff}, nil
+	return &Schedule{path: path, cfg: cfg, onTurnOn: onTurnOn, onTurnOff: onTurnOff}, nil
 }
 
 // reload re-reads the schedule TOML from disk and updates the config atomically.
@@ -160,20 +159,28 @@ func (s *Schedule) Start() {
 				time.Sleep(time.Until(e.at))
 				if e.turnOn {
 					s.onTurnOn()
-					if err := s.cec.TurnOn(); err != nil {
-						log.Printf("schedule: CEC TurnOn: %v", err)
-					}
 				} else {
 					s.onTurnOff()
-					if err := s.cec.TurnOff(); err != nil {
-						log.Printf("schedule: CEC TurnOff: %v", err)
-					}
 				}
 			}
 
 			time.Sleep(time.Until(tomorrow))
 		}
 	}()
+}
+
+// IsOn reports whether the display should be on at time t according to the schedule.
+// It returns true if t falls within an active window, false otherwise.
+func (s *Schedule) IsOn(t time.Time) bool {
+	events := s.eventsForDate(t)
+	on := false
+	for _, e := range events {
+		if e.at.After(t) {
+			break
+		}
+		on = e.turnOn
+	}
+	return on
 }
 
 // eventsForDate returns the merged, sorted list of on/off events for the calendar day of t.

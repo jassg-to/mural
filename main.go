@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,18 +15,14 @@ func main() {
 	flag.Parse()
 
 	cec := NewCEC()
-	ss := NewSlideshow(*contentDir, *interval, *thumbWidth)
-	ss.SetOnResume(func() {
-		if err := cec.TurnOn(); err != nil {
-			log.Printf("CEC TurnOn (manual resume): %v", err)
-		}
-	})
+	ss := NewSlideshow(*contentDir, *interval, *thumbWidth, cec)
 
-	sched, err := LoadSchedule(filepath.Join(*contentDir, "schedule.toml"), cec, ss.Reload, ss.Pause)
+	sched, err := LoadSchedule(filepath.Join(*contentDir, "schedule.toml"), ss.Reload, ss.Pause)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading schedule: %v\n", err)
 		os.Exit(1)
 	}
+	ss.startPaused = !sched.IsOn(time.Now())
 	sched.Start()
 
 	if err := ss.Run(); err != nil {

@@ -128,25 +128,21 @@ type Slideshow struct {
 	ticker     *time.Ticker
 	winSize    func() fyne.Size
 
-	// onResume is called (in a goroutine) when the user manually resumes from pause.
-	onResume func()
+	cec        *CEC
+	startPaused bool
 }
 
-func NewSlideshow(dir string, interval time.Duration, thumbWidth uint) *Slideshow {
-	return &Slideshow{dir: dir, interval: interval, thumbWidth: thumbWidth}
+func NewSlideshow(dir string, interval time.Duration, thumbWidth uint, cec *CEC) *Slideshow {
+	return &Slideshow{dir: dir, interval: interval, thumbWidth: thumbWidth, cec: cec}
 }
 
-// SetOnResume sets a callback invoked when the user presses a key to wake the display.
-// Intended for CEC TurnOn. Safe to call before Run.
-func (s *Slideshow) SetOnResume(f func()) { s.onResume = f }
-
-// Pause stops the slideshow and blacks out the display.
-// Safe to call from any goroutine.
+// Pause stops the slideshow, blacks out the display, and turns off the
+// connected display via CEC. Safe to call from any goroutine.
 func (s *Slideshow) Pause() {
 	fyne.Do(s.pause)
 }
 
-// pause blacks out the display and stops the ticker.
+// pause blacks out the display, stops the ticker, and sends CEC standby.
 // Must be called from the Fyne main goroutine.
 func (s *Slideshow) pause() {
 	s.paused = true
@@ -158,9 +154,15 @@ func (s *Slideshow) pause() {
 		s.img.Image = nil
 		s.img.Refresh()
 	}
+	go func() {
+		if err := s.cec.TurnOff(); err != nil {
+			log.Printf("CEC TurnOff: %v", err)
+		}
+	}()
 }
 
-// resume un-pauses. Must be called from the Fyne main goroutine.
+// resume un-pauses and sends CEC power-on.
+// Must be called from the Fyne main goroutine.
 func (s *Slideshow) resume() {
 	s.paused = false
 	if s.ticker != nil {
@@ -169,6 +171,11 @@ func (s *Slideshow) resume() {
 	if s.img != nil {
 		s.showFast(s.current)
 	}
+	go func() {
+		if err := s.cec.TurnOn(); err != nil {
+			log.Printf("CEC TurnOn: %v", err)
+		}
+	}()
 }
 
 // Reload rescans the content directory, resets to slide 0, and un-pauses.
@@ -252,7 +259,16 @@ func (s *Slideshow) Run() error {
 	s.winSize = w.Canvas().Size
 	s.ticker = time.NewTicker(s.interval)
 
-	s.showFast(0)
+	if s.startPaused {
+		s.pause()
+	} else {
+		s.showFast(0)
+		go func() {
+			if err := s.cec.TurnOn(); err != nil {
+				log.Printf("CEC TurnOn (startup): %v", err)
+			}
+		}()
+	}
 
 	go func() {
 		for range s.ticker.C {
@@ -286,10 +302,7 @@ func (s *Slideshow) Run() error {
 		}
 		// Any other key wakes the display.
 		if s.paused {
-			if s.onResume != nil {
-				go s.onResume() // CEC TurnOn; run in goroutine as it's slow
-			}
-			s.resume()
+			s.resume() // also sends CEC TurnOn
 			// fall through so the key also performs its nav action
 		}
 		n := len(s.slides)
