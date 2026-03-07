@@ -11,7 +11,11 @@ Simple digital signage player that cycles through images in a `content/` subdire
 
 ## Project Structure
 
-- `main.go` — single-file application (slideshow logic, image loading, thumbnails)
+- `main.go` — minimal entrypoint; wires CEC, schedule, and slideshow
+- `slideshow.go` — `Slideshow` struct; image loading, display, pause/resume
+- `cec.go` — `CEC` struct; wraps `cec-client` CLI for HDMI display control
+- `schedule.go` — `Schedule` struct; TOML-driven daily on/off scheduler
+- `schedule.toml` — runtime schedule config (not committed; `.gitignore`d)
 - `content/` — runtime image directory (not committed; `.gitignore`d)
 - `go.mod` / `go.sum` — Go module dependencies
 - `mise.toml` — mise tool versions
@@ -37,12 +41,15 @@ Simple digital signage player that cycles through images in a `content/` subdire
 
 ## Architecture Notes
 
-- Images are loaded from `content/` subdirectory at runtime, sorted by filename.
-- Tiny thumbnails (48px wide) are pre-loaded at startup for instant keyboard navigation.
+- Images are stored as `[]Slide` (path, thumbnail, size, mtime). On `Reload`, unchanged files are reused without re-decoding.
+- Tiny thumbnails (48px wide) are pre-loaded for instant keyboard navigation.
 - Full images are decoded and scaled to the window size on demand (`decodeAndFit`), never held at full resolution.
 - A generation counter (`atomic.Int64`) prevents stale background loads from overwriting newer slides.
 - All off-main-thread UI updates go through `fyne.Do()`.
 - Supported formats: JPG, JPEG, PNG.
+- `Schedule` sleeps until each event; at turn-on it calls `ss.Reload` then `cec.TurnOn`; at turn-off it calls `ss.Pause` then `cec.TurnOff`.
+- `Slideshow.Pause()` blacks the screen and stops the ticker. Any nav key resumes (calls `onResume` → CEC TurnOn in a goroutine, then restarts the ticker).
+- `cec.go` wraps `cec-client -s -d 1`; graceful no-op if `cec-client` is not in `$PATH`.
 
 ## Conventions
 
