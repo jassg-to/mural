@@ -42,13 +42,15 @@ The installer will:
 - Download the `mural` binary
 - Set up your window manager config
 - Create `~/mural/content/` with a sample schedule
-
-If you are running directly on the console (tty1) and have admin access, the installer will also offer to configure **automatic startup**: the Pi will log in and launch the display automatically on every boot.
+- Offer to configure **automatic startup** (autologin + auto-launch on boot)
+- Offer to set up **Samba file sharing** so you can add images from any computer on your network
 
 
 ## Add Your Images
 
-Copy JPG or PNG images into `~/mural/content/`. You can do this over SSH or with a USB drive.
+If you enabled Samba during installation, open your file manager on any computer on the same network and go to `\\<pi-ip-address>\content`. You can drag and drop images directly.
+
+Otherwise, copy JPG or PNG images into `~/mural/content/` over SSH or with a USB drive.
 
 Optionally edit `~/mural/content/schedule.toml` to set the hours when the display should be on.
 

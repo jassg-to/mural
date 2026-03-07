@@ -76,8 +76,6 @@ echo "  3. Type 'startx' to launch"
 echo ""
 
 # ── 6. Offer full system setup ────────────────────────────────────────────────
-echo "Detected: running on tty1 with admin access."
-echo ""
 printf "Configure automatic startup (autologin + auto-launch on boot)? [Y/n] "
 read -r response </dev/tty
 case "${response,,}" in
@@ -125,6 +123,48 @@ DROPINEOF
     echo "Run 'sudo reboot' to start automatically on next boot."
     ;;
   *)
-    echo "Skipped. Re-run this script on tty1 any time to set it up."
+    echo "Skipped. Re-run this script any time to set it up."
+    ;;
+esac
+
+# ── 7. Offer Samba shared folder ───────────────────────────────────────────
+printf "Set up Samba file sharing (access content folder from your network)? [Y/n] "
+read -r response </dev/tty
+case "${response,,}" in
+  ""|y|yes)
+    if ! command -v smbd &>/dev/null; then
+      echo "Installing Samba..."
+      sudo apt install -y samba
+    fi
+
+    SAMBA_CONF="/etc/samba/smb.conf"
+
+    if grep -q '^\[content\]' "$SAMBA_CONF" 2>/dev/null; then
+      echo "Samba [content] share already exists — skipping."
+    else
+      echo "Adding [content] share to $SAMBA_CONF..."
+      sudo tee -a "$SAMBA_CONF" > /dev/null <<SAMBAEOF
+
+[content]
+   path = ${CONTENT_DIR}
+   browseable = yes
+   read only = no
+   guest ok = yes
+   force user = $(id -un)
+SAMBAEOF
+
+      # Ensure guest access is allowed globally
+      if ! grep -q 'map to guest' "$SAMBA_CONF"; then
+        sudo sed -i '/^\[global\]/a\\   map to guest = Bad User' "$SAMBA_CONF"
+      fi
+
+      sudo systemctl restart smbd
+      echo ""
+      echo "Samba share ready. Access from your computer:"
+      echo "  \\\\$(hostname -I | awk '{print $1}')\\content"
+    fi
+    ;;
+  *)
+    echo "Skipped Samba setup."
     ;;
 esac

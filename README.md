@@ -8,7 +8,7 @@ A digital signage player built with [Fyne](https://fyne.io/). Cycles through ima
 curl -fsSL https://raw.githubusercontent.com/jassg-to/mural/main/install.sh | bash
 ```
 
-This downloads the latest pre-built binary, installs dependencies, and sets up the display environment. See [docs/INSTALL.md](docs/INSTALL.md) for the full step-by-step guide starting from hardware setup.
+This downloads the latest pre-built binary, installs dependencies, and sets up the display environment. The installer also offers to configure autologin for kiosk mode and Samba file sharing so you can manage content from any computer on your network. See [docs/INSTALL.md](docs/INSTALL.md) for the full step-by-step guide starting from hardware setup.
 
 ## Prerequisites
 
