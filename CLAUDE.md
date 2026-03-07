@@ -45,7 +45,7 @@ Simple digital signage player that cycles through images in a `content/` subdire
 ## Architecture Notes
 
 - Images are stored as `[]Slide` (path, thumbnail, size, mtime). On `Reload`, unchanged files are reused without re-decoding.
-- Tiny thumbnails (48px wide) are pre-loaded for instant keyboard navigation.
+- Tiny thumbnails (default 80px wide, configurable via `-thumb-width` flag) are pre-loaded for instant keyboard navigation.
 - Full images are decoded and scaled to the window size on demand (`decodeAndFit`), never held at full resolution.
 - A generation counter (`atomic.Int64`) prevents stale background loads from overwriting newer slides.
 - All off-main-thread UI updates go through `fyne.Do()`.

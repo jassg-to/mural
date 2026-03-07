@@ -12,10 +12,11 @@ import (
 func main() {
 	interval := flag.Duration("interval", 30*time.Second, "time between slides")
 	contentDir := flag.String("content", "content", "directory containing images and schedule.toml")
+	thumbWidth := flag.Uint("thumb-width", 80, "thumbnail width in pixels")
 	flag.Parse()
 
 	cec := NewCEC()
-	ss := NewSlideshow(*contentDir, *interval)
+	ss := NewSlideshow(*contentDir, *interval, *thumbWidth)
 	ss.SetOnResume(func() {
 		if err := cec.TurnOn(); err != nil {
 			log.Printf("CEC TurnOn (manual resume): %v", err)

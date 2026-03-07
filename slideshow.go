@@ -36,7 +36,7 @@ type Slide struct {
 	mtime time.Time
 }
 
-func loadThumbnail(path string) image.Image {
+func loadThumbnail(path string, width uint) image.Image {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -46,13 +46,13 @@ func loadThumbnail(path string) image.Image {
 	if err != nil {
 		return nil
 	}
-	return resize.Resize(48, 0, src, resize.Lanczos3)
+	return resize.Resize(width, 0, src, resize.Lanczos3)
 }
 
 // scanSlides scans dir for images and returns a []Slide. existing slides whose
 // path, size, and mtime are unchanged are reused as-is (thumbnail not reloaded).
-func scanSlides(dir string, existing []Slide) ([]Slide, error) {
-	entries, err := os.ReadDir(dir)
+func (s *Slideshow) scanSlides(existing []Slide) ([]Slide, error) {
+	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading content directory: %w", err)
 	}
@@ -71,7 +71,7 @@ func scanSlides(dir string, existing []Slide) ([]Slide, error) {
 		if !imageExts[ext] {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
+		path := filepath.Join(s.dir, e.Name())
 		info, err := e.Info()
 		if err != nil {
 			continue
@@ -82,7 +82,7 @@ func scanSlides(dir string, existing []Slide) ([]Slide, error) {
 		}
 		slides = append(slides, Slide{
 			path:  path,
-			thumb: loadThumbnail(path),
+			thumb: loadThumbnail(path, s.thumbWidth),
 			size:  info.Size(),
 			mtime: info.ModTime(),
 		})
@@ -114,8 +114,9 @@ func decodeAndFit(path string, width, height float32) (image.Image, error) {
 
 // Slideshow loads images from dir and displays them as a fullscreen slideshow.
 type Slideshow struct {
-	dir      string
-	interval time.Duration
+	dir        string
+	interval   time.Duration
+	thumbWidth uint
 
 	// fields below are set during Run and accessed only on the Fyne main goroutine,
 	// except via Pause/Reload which marshal through fyne.Do.
@@ -131,8 +132,8 @@ type Slideshow struct {
 	onResume func()
 }
 
-func NewSlideshow(dir string, interval time.Duration) *Slideshow {
-	return &Slideshow{dir: dir, interval: interval}
+func NewSlideshow(dir string, interval time.Duration, thumbWidth uint) *Slideshow {
+	return &Slideshow{dir: dir, interval: interval, thumbWidth: thumbWidth}
 }
 
 // SetOnResume sets a callback invoked when the user presses a key to wake the display.
@@ -181,7 +182,7 @@ func (s *Slideshow) Reload() {
 		copy(existing, s.slides)
 	})
 
-	slides, err := scanSlides(s.dir, existing)
+	slides, err := s.scanSlides(existing)
 	if err != nil {
 		log.Printf("slideshow reload: %v", err)
 		return
@@ -228,7 +229,7 @@ func (s *Slideshow) showFast(index int) {
 
 // Run loads images, opens the window, and blocks until the user quits.
 func (s *Slideshow) Run() error {
-	slides, err := scanSlides(s.dir, nil)
+	slides, err := s.scanSlides(nil)
 	if err != nil {
 		return err
 	}
@@ -302,6 +303,7 @@ func (s *Slideshow) Run() error {
 		case fyne.KeyHome:
 			s.showFast(0)
 			s.ticker.Reset(s.interval)
+			go s.Reload()
 		}
 	})
 
