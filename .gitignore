@@ -1,8 +1,8 @@
 .DS_Store
 ._*
-.claude
+/.claude
+/content/
+/mural
+/mural.exe
 Desktop.ini
 Thumbs.db
-mural-digital
-mural-digital.exe
-content/

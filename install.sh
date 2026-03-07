@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="jassg-to/mural-digital"
+REPO="jassg-to/mural"
 INSTALL_DIR="$HOME/.local/bin"
-CONTENT_DIR="$HOME/mural-digital/content"
+CONTENT_DIR="$HOME/mural/content"
 
 # ── 1. System packages ────────────────────────────────────────────────────────
 echo "Installing system packages..."
@@ -22,11 +22,11 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-BINARY_URL="https://github.com/$REPO/releases/latest/download/mural-digital_linux_$ARCH_TAG"
-echo "Downloading mural-digital ($ARCH_TAG)..."
+BINARY_URL="https://github.com/$REPO/releases/latest/download/mural_linux_$ARCH_TAG"
+echo "Downloading mural ($ARCH_TAG)..."
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$BINARY_URL" -o "$INSTALL_DIR/mural-digital"
-chmod +x "$INSTALL_DIR/mural-digital"
+curl -fsSL "$BINARY_URL" -o "$INSTALL_DIR/mural"
+chmod +x "$INSTALL_DIR/mural"
 
 # Ensure ~/.local/bin is on PATH in future shells
 if ! grep -q 'local/bin' "$HOME/.bashrc" 2>/dev/null; then
@@ -43,8 +43,8 @@ EOF
 
 cat > "$HOME/.xinitrc" <<'EOF'
 ratpoison &
-cd ~/mural-digital
-exec mural-digital
+cd ~/mural
+exec mural
 EOF
 
 # ── 4. Content directory + sample schedule ────────────────────────────────────
@@ -67,7 +67,7 @@ fi
 
 # ── 5. Done ───────────────────────────────────────────────────────────────────
 echo ""
-echo "mural-digital installed successfully."
+echo "mural installed successfully."
 echo ""
 echo "Next steps:"
 echo "  1. Copy images (JPG/PNG) into $CONTENT_DIR"

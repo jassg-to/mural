@@ -1,4 +1,4 @@
-module github.com/jassg-to/mural-digital
+module github.com/jassg-to/mural
 
 go 1.25.0
 

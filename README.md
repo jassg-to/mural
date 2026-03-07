@@ -1,11 +1,11 @@
-# Mural Digital
+# Mural
 
 A digital signage player built with [Fyne](https://fyne.io/). Cycles through images in a content directory, with a daily schedule for display on/off times and HDMI CEC control. Optimized for Raspberry Pi.
 
 ## Quick Install (Raspberry Pi)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jassg-to/mural-digital/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jassg-to/mural/main/install.sh | bash
 ```
 
 This downloads the latest pre-built binary, installs dependencies, and sets up the display environment. See [docs/INSTALL.md](docs/INSTALL.md) for the full step-by-step guide starting from hardware setup.
@@ -23,7 +23,7 @@ go build .
 mkdir -p content
 # Place your .jpg / .jpeg / .png images in content/
 # Create a schedule (see below)
-./mural-digital
+./mural
 ```
 
 ### Options
@@ -34,7 +34,7 @@ mkdir -p content
 | `-content` | `content` | Directory containing images and `schedule.toml` |
 
 ```bash
-./mural-digital -interval 10s -content /var/mural
+./mural -interval 10s -content /var/mural
 ```
 
 ### Controls

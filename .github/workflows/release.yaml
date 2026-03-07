@@ -88,12 +88,12 @@ jobs:
           GOARM: ${{ matrix.goarm || '' }}
           CC: ${{ matrix.cross_cc || 'gcc' }}
           PKG_CONFIG_PATH: ${{ matrix.pkg_config_path || '' }}
-        run: go build -trimpath -ldflags="-s -w" -o mural-digital_linux_${{ matrix.suffix }} .
+        run: go build -trimpath -ldflags="-s -w" -o mural_linux_${{ matrix.suffix }} .
 
       - uses: actions/upload-artifact@v7
         with:
-          name: mural-digital_linux_${{ matrix.suffix }}
-          path: mural-digital_linux_${{ matrix.suffix }}
+          name: mural_linux_${{ matrix.suffix }}
+          path: mural_linux_${{ matrix.suffix }}
 
   release:
     needs: build
@@ -106,4 +106,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: mural-digital_linux_*
+          files: mural_linux_*

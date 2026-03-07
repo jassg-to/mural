@@ -1,4 +1,4 @@
-# Mural Digital
+# Mural
 
 Simple digital signage player that cycles through images in a `content/` subdirectory. Optimized for Raspberry Pi.
 
@@ -58,7 +58,7 @@ Simple digital signage player that cycles through images in a `content/` subdire
 ## Deployment
 
 - Pre-built Linux binaries (amd64, arm64, armv7) are published as GitHub Releases on every tag push.
-- `install.sh` is a curl-pipe-bash installer: installs system packages, downloads the latest release binary, writes X11/ratpoison dotfiles, creates `~/mural-digital/content/` with a sample schedule, and optionally configures systemd autologin for kiosk mode.
+- `install.sh` is a curl-pipe-bash installer: installs system packages, downloads the latest release binary, writes X11/ratpoison dotfiles, creates `~/mural/content/` with a sample schedule, and optionally configures systemd autologin for kiosk mode.
 - `docs/INSTALL.md` covers the full Raspberry Pi journey from hardware purchase through first boot.
 
 ## Conventions

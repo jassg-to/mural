@@ -29,28 +29,28 @@ The initial setup will go through several screens and reboot once or twice. This
 4. Select **Finish**. You do not need to reboot yet.
 
 
-## Install mural-digital
+## Install Mural
 
 Run this single command:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/jassg-to/mural-digital/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jassg-to/mural/main/install.sh | bash
 ```
 
 The installer will:
 - Install required packages (`xinit`, `ratpoison`, `cec-utils`)
-- Download the `mural-digital` binary
+- Download the `mural` binary
 - Set up your window manager config
-- Create `~/mural-digital/content/` with a sample schedule
+- Create `~/mural/content/` with a sample schedule
 
 If you are running directly on the console (tty1) and have admin access, the installer will also offer to configure **automatic startup**: the Pi will log in and launch the display automatically on every boot.
 
 
 ## Add Your Images
 
-Copy JPG or PNG images into `~/mural-digital/content/`. You can do this over SSH or with a USB drive.
+Copy JPG or PNG images into `~/mural/content/`. You can do this over SSH or with a USB drive.
 
-Optionally edit `~/mural-digital/content/schedule.toml` to set the hours when the display should be on.
+Optionally edit `~/mural/content/schedule.toml` to set the hours when the display should be on.
 
 
 ## Run
@@ -71,7 +71,7 @@ sudo reboot
 If you skipped that option and want to enable it later, re-run the installer:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/jassg-to/mural-digital/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jassg-to/mural/main/install.sh | bash
 ```
 
 Make sure you are logged in directly on the console (not over SSH) so the installer can detect the tty and offer the full setup.
