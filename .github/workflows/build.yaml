@@ -78,18 +78,28 @@ jobs:
         if: matrix.dpkg_arch
         run: |
           sudo dpkg --add-architecture ${{ matrix.dpkg_arch }}
-          # Restrict existing sources to amd64; add ports.ubuntu.com for the target arch
+
+          # Pin existing DEB822 sources (ubuntu.sources) to amd64 only
+          for f in /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$f" ] && ! grep -q '^Architectures:' "$f"; then
+              sudo sed -i '/^Types:/a Architectures: amd64' "$f"
+            fi
+          done
+
+          # Also handle legacy sources.list if present
           sudo sed -i \
             's|^deb http://archive.ubuntu.com/ubuntu |deb [arch=amd64] http://archive.ubuntu.com/ubuntu |' \
-            /etc/apt/sources.list
+            /etc/apt/sources.list 2>/dev/null || true
           sudo sed -i \
             's|^deb http://security.ubuntu.com/ubuntu |deb [arch=amd64] http://security.ubuntu.com/ubuntu |' \
-            /etc/apt/sources.list
+            /etc/apt/sources.list 2>/dev/null || true
+
+          # Add ports.ubuntu.com for the target arch
           printf '%s\n' \
             "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe" \
             "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe" \
             "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe" \
-            | sudo tee -a /etc/apt/sources.list
+            | sudo tee /etc/apt/sources.list.d/cross-${{ matrix.dpkg_arch }}.list
           sudo apt-get update
           sudo apt-get install -y \
             ${{ matrix.cross_pkg }} \
