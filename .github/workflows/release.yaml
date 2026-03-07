@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suffix: amd64
+            goarch: amd64
+
+          - suffix: arm64
+            goarch: arm64
+            dpkg_arch: arm64
+            cross_cc: aarch64-linux-gnu-gcc
+            cross_pkg: gcc-aarch64-linux-gnu
+            pkg_config_path: /usr/lib/aarch64-linux-gnu/pkgconfig
+
+          - suffix: arm
+            goarch: arm
+            goarm: "7"
+            dpkg_arch: armhf
+            cross_cc: arm-linux-gnueabihf-gcc
+            cross_pkg: gcc-arm-linux-gnueabihf
+            pkg_config_path: /usr/lib/arm-linux-gnueabihf/pkgconfig
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install native GL/X11 headers
+        run: |
+          sudo apt-get install -y \
+            pkg-config \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxxf86vm-dev
+
+      - name: Set up cross-compilation (${{ matrix.dpkg_arch }})
+        if: matrix.dpkg_arch
+        run: |
+          sudo dpkg --add-architecture ${{ matrix.dpkg_arch }}
+          # Restrict existing sources to amd64; add ports.ubuntu.com for the target arch
+          sudo sed -i \
+            's|^deb http://archive.ubuntu.com/ubuntu |deb [arch=amd64] http://archive.ubuntu.com/ubuntu |' \
+            /etc/apt/sources.list
+          sudo sed -i \
+            's|^deb http://security.ubuntu.com/ubuntu |deb [arch=amd64] http://security.ubuntu.com/ubuntu |' \
+            /etc/apt/sources.list
+          printf '%s\n' \
+            "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe" \
+            "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe" \
+            "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe" \
+            | sudo tee -a /etc/apt/sources.list
+          sudo apt-get update
+          sudo apt-get install -y \
+            ${{ matrix.cross_pkg }} \
+            libgl1-mesa-dev:${{ matrix.dpkg_arch }} \
+            libx11-dev:${{ matrix.dpkg_arch }} \
+            libxrandr-dev:${{ matrix.dpkg_arch }} \
+            libxinerama-dev:${{ matrix.dpkg_arch }} \
+            libxcursor-dev:${{ matrix.dpkg_arch }} \
+            libxi-dev:${{ matrix.dpkg_arch }} \
+            libxxf86vm-dev:${{ matrix.dpkg_arch }}
+
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm || '' }}
+          CC: ${{ matrix.cross_cc || 'gcc' }}
+          PKG_CONFIG_PATH: ${{ matrix.pkg_config_path || '' }}
+        run: go build -trimpath -ldflags="-s -w" -o mural-digital_linux_${{ matrix.suffix }} .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mural-digital_linux_${{ matrix.suffix }}
+          path: mural-digital_linux_${{ matrix.suffix }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: mural-digital_linux_*

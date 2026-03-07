@@ -13,24 +13,65 @@ Perform these steps from a separate Windows, Mac or Linux computer.
    6. **Write**
 4. From this point on, Windows will sometimes ask if you want to format the device. **Always say no.**
 5. Insert the SD card into the Raspberry Pi board.
-6. Connect keyboard, mouse, and HDMI cable.
+6. Connect keyboard and HDMI cable.
 7. Connect the power supply last.
 
 The initial setup will go through several screens and reboot once or twice. This is expected.
 
 
-## Configuration
+## First Boot
 
-1. You should see a screen with a blue background and a terminal window. It will prompt you to create a username and password. Create them and remember them.
-2. You will eventually see a prompt like this: `raspberrypi login:`. Log in with the username and password you created.
-3. Type `sudo raspi-config` and press `Enter`. This will open a blue screen with a menu. The options below may change over time but they all will exist in some form.
-5. Open `System Options` ▶ `Wireless LAN`. Enter your Wi-Fi network name (SSID) and passphrase.
-4. Open `System Options` ▶ `Boot` ▶ `Console Text console`.
-4. Open `System Options` ▶ `Auto Login` ▶ Yes.
-6. Open `Localisation Options` ▶ `Change Timezone`. Select the closest relevant location.
-7. This is a good opportunity to explore other administrative options, like SSH.
-8. Once you're done, select `Finish` and don't reboot yet.
-9. Install git with `sudo apt install git`
-10. Clone this repository with `git clone https://github.com/jassg-to/mural-digital.git`
-11. Run the installer with `mural-digital/dotfiles/install.sh`
-12. Reboot with `sudo reboot`
+1. You will be prompted to create a username and password. Create them and remember them.
+2. You will eventually see a prompt like `raspberrypi login:`. Log in with the username and password you created.
+3. Type `sudo raspi-config` and press Enter. Navigate the menu:
+   - **System Options** ▶ **Wireless LAN** — enter your Wi-Fi network name and passphrase.
+   - **Localisation Options** ▶ **Timezone** — select the closest location.
+4. Select **Finish**. You do not need to reboot yet.
+
+
+## Install mural-digital
+
+Run this single command:
+
+```
+curl -fsSL https://raw.githubusercontent.com/jassg-to/mural-digital/main/install.sh | bash
+```
+
+The installer will:
+- Install required packages (`xinit`, `ratpoison`, `cec-utils`)
+- Download the `mural-digital` binary
+- Set up your window manager config
+- Create `~/mural-digital/content/` with a sample schedule
+
+If you are running directly on the console (tty1) and have admin access, the installer will also offer to configure **automatic startup**: the Pi will log in and launch the display automatically on every boot.
+
+
+## Add Your Images
+
+Copy JPG or PNG images into `~/mural-digital/content/`. You can do this over SSH or with a USB drive.
+
+Optionally edit `~/mural-digital/content/schedule.toml` to set the hours when the display should be on.
+
+
+## Run
+
+Type `startx` and press Enter. The slideshow will launch.
+
+Press any arrow key to manually advance slides. The display will turn off and on automatically according to your schedule.
+
+
+## Automatic Startup
+
+If you accepted the automatic startup option during installation, the Pi will launch the display on its own after every reboot. To reboot now:
+
+```
+sudo reboot
+```
+
+If you skipped that option and want to enable it later, re-run the installer:
+
+```
+curl -fsSL https://raw.githubusercontent.com/jassg-to/mural-digital/main/install.sh | bash
+```
+
+Make sure you are logged in directly on the console (not over SSH) so the installer can detect the tty and offer the full setup.

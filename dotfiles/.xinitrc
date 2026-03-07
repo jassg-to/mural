@@ -1,3 +1,4 @@
 
 ratpoison &
-exec uv run mural-digital
+cd ~/mural-digital
+exec mural-digital

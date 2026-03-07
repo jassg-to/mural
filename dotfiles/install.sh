@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 sudo apt install -y xinit ratpoison git cec-utils
-curl -LsSf https://astral.sh/uv/install.sh | sh
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 

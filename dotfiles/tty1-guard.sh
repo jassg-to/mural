@@ -1,24 +1,13 @@
 #!/usr/bin/env bash
 
-if [ "$(tty)" != "/dev/tty1" ]; then
-    exit 1
-fi
-
-cd "$(dirname "$0")"/..
-
-git reset --hard HEAD
-git pull --ff-only
+[ "$(tty)" != "/dev/tty1" ] && exit 1
 
 startx
 
-cat <<EOF
-    ****************************************************************
-    ****************************************************************
-    ***                                                          ***
-    ***  Waiting 10 seconds before restarting...                 ***
-    ***  Press Ctrl+C to enter the system shell.                 ***
-    ***                                                          ***
-    ****************************************************************
-    ****************************************************************
+cat <<'EOF'
+    ************************************************************
+    ***  Waiting 10 seconds before restarting...             ***
+    ***  Press Ctrl+C to enter the system shell.             ***
+    ************************************************************
 EOF
 sleep 10
