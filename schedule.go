@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -56,8 +57,9 @@ type SpecialRule struct {
 
 // ScheduleConfig is the top-level TOML structure.
 type ScheduleConfig struct {
-	Weekday WeekdayConfig `toml:"weekday"`
-	Special []SpecialRule `toml:"special"`
+	Weekday    WeekdayConfig `toml:"weekday"`
+	Special    []SpecialRule `toml:"special"`
+	ReloadTime string        `toml:"reload_time"` // HH:MM to auto-reload the schedule daily; defaults to "01:00"
 }
 
 // event is a single scheduled CEC action.
@@ -68,7 +70,9 @@ type event struct {
 
 // Schedule fires CEC on/off commands according to a TOML config file.
 type Schedule struct {
+	path      string
 	cfg       ScheduleConfig
+	mu        sync.RWMutex
 	cec       *CEC
 	onTurnOn  func()
 	onTurnOff func()
@@ -86,11 +90,56 @@ func LoadSchedule(path string, cec *CEC, onTurnOn func(), onTurnOff func()) (*Sc
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing schedule: %w", err)
 	}
-	return &Schedule{cfg: cfg, cec: cec, onTurnOn: onTurnOn, onTurnOff: onTurnOff}, nil
+	return &Schedule{path: path, cfg: cfg, cec: cec, onTurnOn: onTurnOn, onTurnOff: onTurnOff}, nil
+}
+
+// reload re-reads the schedule TOML from disk and updates the config atomically.
+func (s *Schedule) reload() error {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return fmt.Errorf("reading schedule: %w", err)
+	}
+	var cfg ScheduleConfig
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parsing schedule: %w", err)
+	}
+	s.mu.Lock()
+	s.cfg = cfg
+	s.mu.Unlock()
+	log.Printf("schedule: reloaded from %s", s.path)
+	return nil
 }
 
 // Start launches a background goroutine that fires CEC commands at the scheduled times.
+// A second goroutine reloads the schedule file daily at the configured reload_hour (default 1am).
 func (s *Schedule) Start() {
+	go func() {
+		for {
+			now := time.Now()
+			s.mu.RLock()
+			reloadTime := s.cfg.ReloadTime
+			s.mu.RUnlock()
+			if reloadTime == "" {
+				reloadTime = "01:00"
+			}
+			mins, err := parseHHMM(reloadTime)
+			if err != nil {
+				log.Printf("schedule: invalid reload_time %q: %v; using 01:00", reloadTime, err)
+				mins = 60
+			}
+			year, month, day := now.Date()
+			loc := now.Location()
+			next := time.Date(year, month, day, mins/60, mins%60, 0, 0, loc)
+			if !next.After(now) {
+				next = next.AddDate(0, 0, 1)
+			}
+			time.Sleep(time.Until(next))
+			if err := s.reload(); err != nil {
+				log.Printf("schedule: auto-reload: %v", err)
+			}
+		}
+	}()
+
 	go func() {
 		for {
 			now := time.Now()
@@ -129,12 +178,16 @@ func (s *Schedule) Start() {
 
 // eventsForDate returns the merged, sorted list of on/off events for the calendar day of t.
 func (s *Schedule) eventsForDate(t time.Time) []event {
+	s.mu.RLock()
+	cfg := s.cfg
+	s.mu.RUnlock()
+
 	year, month, day := t.Date()
 	weekday := t.Weekday()
 
-	windows := append([]Window{}, s.cfg.Weekday.forWeekday(weekday)...)
+	windows := append([]Window{}, cfg.Weekday.forWeekday(weekday)...)
 
-	for _, rule := range s.cfg.Special {
+	for _, rule := range cfg.Special {
 		ruleDay, ok := parseWeekday(rule.Weekday)
 		if !ok {
 			log.Printf("schedule: unknown weekday %q in special rule %q", rule.Weekday, rule.Name)

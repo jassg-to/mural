@@ -15,7 +15,7 @@ go build .
 mkdir -p content
 # Place your .jpg / .jpeg / .png images in content/
 # Copy and edit the schedule (see below)
-cp schedule.toml.example schedule.toml
+cp schedule.toml.example content/schedule.toml
 ./mural-digital
 ```
 
@@ -24,10 +24,10 @@ cp schedule.toml.example schedule.toml
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-interval` | `30s` | Time between automatic slide transitions |
-| `-schedule` | `schedule.toml` | Path to the schedule config file |
+| `-content` | `content` | Directory containing images and `schedule.toml` |
 
 ```bash
-./mural-digital -interval 10s -schedule /etc/mural/schedule.toml
+./mural-digital -interval 10s -content /var/mural
 ```
 
 ### Controls
@@ -45,9 +45,11 @@ The window defaults to 800x450 and is resizable.
 
 ## Schedule
 
-Create a `schedule.toml` (gitignored) to control daily on/off windows:
+Create a `content/schedule.toml` to control daily on/off windows:
 
 ```toml
+reload_time = "01:00"  # reload this file daily at this time (HH:MM; default: "01:00")
+
 [weekday]
 monday    = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
 tuesday   = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]

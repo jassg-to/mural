@@ -5,23 +5,24 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 )
 
 func main() {
 	interval := flag.Duration("interval", 30*time.Second, "time between slides")
-	scheduleFile := flag.String("schedule", "schedule.toml", "schedule config file")
+	contentDir := flag.String("content", "content", "directory containing images and schedule.toml")
 	flag.Parse()
 
 	cec := NewCEC()
-	ss := NewSlideshow("content", *interval)
+	ss := NewSlideshow(*contentDir, *interval)
 	ss.SetOnResume(func() {
 		if err := cec.TurnOn(); err != nil {
 			log.Printf("CEC TurnOn (manual resume): %v", err)
 		}
 	})
 
-	sched, err := LoadSchedule(*scheduleFile, cec, ss.Reload, ss.Pause)
+	sched, err := LoadSchedule(filepath.Join(*contentDir, "schedule.toml"), cec, ss.Reload, ss.Pause)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading schedule: %v\n", err)
 		os.Exit(1)
