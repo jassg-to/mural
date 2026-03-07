@@ -2,16 +2,14 @@
 set -euo pipefail
 
 REPO="jassg-to/mural"
-INSTALL_DIR="$HOME/.local/bin"
+INSTALL_DIR="$HOME/mural"
 CONTENT_DIR="$HOME/mural/content"
+CURRENT_USER=$(id -un)
 
 # ── 1. System packages ────────────────────────────────────────────────────────
 echo "Installing system packages..."
 sudo apt update
-sudo apt install -y \
-  xinit ratpoison cec-utils \
-  libgl1 \
-  libx11-6 libxrandr2 libxinerama1 libxcursor1 libxi6 libxxf86vm1
+sudo apt install -y xinit ratpoison cec-utils libgl1
 
 # ── 2. Binary from GitHub Releases ───────────────────────────────────────────
 ARCH=$(uname -m)
@@ -28,12 +26,6 @@ mkdir -p "$INSTALL_DIR"
 curl -fsSL "$BINARY_URL" -o "$INSTALL_DIR/mural"
 chmod +x "$INSTALL_DIR/mural"
 
-# Ensure ~/.local/bin is on PATH in future shells
-if ! grep -q 'local/bin' "$HOME/.bashrc" 2>/dev/null; then
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-fi
-export PATH="$HOME/.local/bin:$PATH"
-
 # ── 3. Dotfiles ───────────────────────────────────────────────────────────────
 echo "Writing dotfiles..."
 
@@ -44,7 +36,7 @@ EOF
 cat > "$HOME/.xinitrc" <<'EOF'
 ratpoison &
 cd ~/mural
-exec mural
+exec ./mural
 EOF
 
 # ── 4. Content directory + sample schedule ────────────────────────────────────
@@ -89,26 +81,25 @@ startx
 
 cat <<'BANNER'
     ************************************************************
-    ***  Waiting 10 seconds before restarting...             ***
+    ***  Waiting 30 seconds before restarting...             ***
     ***  Press Ctrl+C to enter the system shell.             ***
     ************************************************************
 BANNER
-sleep 10
+sleep 30
 GUARDEOF
     chmod +x "$INSTALL_DIR/tty1-guard.sh"
 
     # Add tty1-guard hook to .bashrc (idempotent)
     if ! grep -q "tty1-guard.sh" "$HOME/.bashrc" 2>/dev/null; then
-      cat >> "$HOME/.bashrc" <<'BASHRCEOF'
+      cat >> "$HOME/.bashrc" <<BASHRCEOF
 
-if bash "$HOME/.local/bin/tty1-guard.sh"; then
+if bash "${INSTALL_DIR}/tty1-guard.sh"; then
   exit 1
 fi
 BASHRCEOF
     fi
 
     # Configure console autologin via systemd drop-in
-    CURRENT_USER=$(id -un)
     DROPIN=/etc/systemd/system/getty@tty1.service.d/autologin.conf
     sudo mkdir -p "$(dirname "$DROPIN")"
     sudo tee "$DROPIN" > /dev/null <<DROPINEOF
@@ -137,6 +128,13 @@ case "${response,,}" in
       sudo apt install -y samba
     fi
 
+    # Set/reset the Samba password for the current user
+    echo ""
+    echo "Set a Samba password for user '${CURRENT_USER}'."
+    echo "You'll use this when connecting from Windows/Mac."
+    sudo smbpasswd -a "${CURRENT_USER}"
+    sudo smbpasswd -e "${CURRENT_USER}"
+
     SAMBA_CONF="/etc/samba/smb.conf"
 
     if grep -q '^\[content\]' "$SAMBA_CONF" 2>/dev/null; then
@@ -149,20 +147,18 @@ case "${response,,}" in
    path = ${CONTENT_DIR}
    browseable = yes
    read only = no
-   guest ok = yes
-   force user = $(id -un)
+   guest ok = no
+   force user = ${CURRENT_USER}
+   valid users = ${CURRENT_USER}
 SAMBAEOF
 
-      # Ensure guest access is allowed globally
-      if ! grep -q 'map to guest' "$SAMBA_CONF"; then
-        sudo sed -i '/^\[global\]/a\\   map to guest = Bad User' "$SAMBA_CONF"
-      fi
-
       sudo systemctl restart smbd
-      echo ""
-      echo "Samba share ready. Access from your computer:"
-      echo "  \\\\$(hostname -I | awk '{print $1}')\\content"
     fi
+
+    echo ""
+    echo "Samba share ready. Access from your computer:"
+    echo "  \\\\$(hostname -I | awk '{print $1}')\\content"
+    echo "  Username: ${CURRENT_USER}"
     ;;
   *)
     echo "Skipped Samba setup."
