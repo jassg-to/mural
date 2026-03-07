@@ -142,17 +142,21 @@ func (s *Slideshow) SetOnResume(f func()) { s.onResume = f }
 // Pause stops the slideshow and blacks out the display.
 // Safe to call from any goroutine.
 func (s *Slideshow) Pause() {
-	fyne.Do(func() {
-		s.paused = true
-		s.generation.Add(1) // cancel any in-flight background load
-		if s.ticker != nil {
-			s.ticker.Stop()
-		}
-		if s.img != nil {
-			s.img.Image = nil
-			s.img.Refresh()
-		}
-	})
+	fyne.Do(s.pause)
+}
+
+// pause blacks out the display and stops the ticker.
+// Must be called from the Fyne main goroutine.
+func (s *Slideshow) pause() {
+	s.paused = true
+	s.generation.Add(1) // cancel any in-flight background load
+	if s.ticker != nil {
+		s.ticker.Stop()
+	}
+	if s.img != nil {
+		s.img.Image = nil
+		s.img.Refresh()
+	}
 }
 
 // resume un-pauses. Must be called from the Fyne main goroutine.
@@ -270,12 +274,17 @@ func (s *Slideshow) Run() error {
 	}()
 
 	w.Canvas().SetOnTypedKey(func(ev *fyne.KeyEvent) {
-		if ev.Name == fyne.KeyEscape {
+		// Handle non-nav keys.
+		switch ev.Name {
+		case fyne.KeyEscape:
 			a.Quit()
 			return
+		case fyne.KeyDelete:
+			s.pause() // simulate schedule off
+			return
 		}
+		// Any other key wakes the display.
 		if s.paused {
-			// Any nav key wakes the display.
 			if s.onResume != nil {
 				go s.onResume() // CEC TurnOn; run in goroutine as it's slow
 			}
