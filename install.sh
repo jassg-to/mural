@@ -47,27 +47,32 @@ EOF
 # ── 4. Content directory + sample schedule ────────────────────────────────────
 mkdir -p "$CONTENT_DIR"
 
-if [ ! -f "$CONTENT_DIR/schedule.toml" ]; then
-  cat > "$CONTENT_DIR/schedule.toml" <<'EOF'
+if [ ! -f "$CONTENT_DIR/config.toml" ]; then
+  cat > "$CONTENT_DIR/config.toml" <<'EOF'
+[slideshow]
+interval = "30s"    # time between slides (e.g. "30s", "1m", "2m30s")
+thumb_width = 80    # thumbnail width in pixels for keyboard navigation
+
+[schedule]
 reload_time = "01:00"  # reload this file daily at this time (HH:MM)
 
-[monday]
+[schedule.monday]
 all = [ "08:00-12:00", "13:30-22:00" ]
 
-[tuesday]
+[schedule.tuesday]
 all = [ "08:00-12:00", "13:30-22:00" ]
 
-[wednesday]
+[schedule.wednesday]
 all = [ "08:00-12:00", "13:30-22:00" ]
 
-[thursday]
+[schedule.thursday]
 all = [ "08:00-12:00", "13:30-22:00" ]
 second = [ "07:00-08:00" ]
 
-[friday]
+[schedule.friday]
 all = [ "08:00-12:00", "13:30-22:00" ]
 
-[saturday]
+[schedule.saturday]
 all = [ "10:00-18:00" ]
 last = [ "18:00-22:00"]
 
@@ -81,7 +86,7 @@ echo "mural installed successfully."
 echo ""
 echo "Next steps:"
 echo "  1. Copy images (JPG/PNG) into $CONTENT_DIR"
-echo "  2. Edit $CONTENT_DIR/schedule.toml to set your display hours"
+echo "  2. Edit $CONTENT_DIR/config.toml to set your display hours and slideshow settings"
 echo "  3. Type 'startx' to launch"
 echo ""
 

@@ -52,7 +52,7 @@ If you enabled Samba during installation, open your file manager on any computer
 
 Otherwise, copy JPG or PNG images into `~/mural/content/` over SSH or with a USB drive.
 
-Optionally edit `~/mural/content/schedule.toml` to set the hours when the display should be on.
+Optionally edit `~/mural/content/config.toml` to set slideshow settings and the hours when the display should be on.
 
 
 ## Run

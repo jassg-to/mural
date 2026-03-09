@@ -26,17 +26,11 @@ mkdir -p content
 ./mural
 ```
 
-### Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-interval` | `30s` | Time between automatic slide transitions |
-| `-content` | `content` | Directory containing images and `schedule.toml` |
-| `-thumb-width` | `80` | Thumbnail width in pixels |
-
 ```bash
-./mural -interval 10s -content /var/mural
+./mural /var/mural
 ```
+
+The optional argument specifies the content directory (default: `content`).
 
 ### Controls
 
@@ -52,45 +46,41 @@ When the display is paused (scheduled off-time or Delete key), any nav key wakes
 
 The window defaults to 800x450 and is resizable. Ratpoison will automatically fit it to screen.
 
-## Schedule
+## Configuration
 
-Create a `schedule.toml` inside your content directory to control daily on/off windows:
+Create a `config.toml` inside your content directory:
 
 ```toml
+[slideshow]
+interval = "30s"       # time between slides (e.g. "30s", "1m", "2m30s")
+thumb_width = 80       # thumbnail width in pixels for keyboard navigation
+
+[schedule]
 reload_time = "01:00"  # reload this file daily at this time (HH:MM; default: "01:00")
 
-[weekday]
-monday    = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-tuesday   = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-wednesday = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-thursday  = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-friday    = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-saturday  = [{ on = "10:00", off = "18:00" }]
-sunday    = []   # off all day
+[schedule.monday]
+all = [ "08:00-12:00", "13:30-22:00" ]
 
-[[special]]
-name       = "Last Sunday"
-weekday    = "Sunday"
-occurrence = -1   # 1 = first, 2 = second, -1 = last
-windows    = [{ on = "09:00", off = "14:00" }]
+[schedule.tuesday]
+all = [ "08:00-12:00", "13:30-22:00" ]
 
-[[special]]
-name       = "First Saturday"
-weekday    = "Saturday"
-occurrence = 1
-windows    = [{ on = "07:00", off = "20:00" }]
+[schedule.saturday]
+all = [ "10:00-18:00" ]
+last = [ "18:00-22:00" ]  # extra hours on the last Saturday of the month
+
+# sunday: off all day (no section needed)
 ```
 
-- Each day has a list of `{ on, off }` windows in `HH:MM` (local time).
-- `[[special]]` rules match an Nth weekday of the month and add extra on-time (union with the regular weekday windows).
+- Each day has a list of `"HH:MM-HH:MM"` windows (local time).
+- Day sections support occurrence fields (`first`, `second`, `third`, `fourth`, `last`) that match an Nth weekday of the month and add extra on-time (union with `all` windows).
 - Overlapping windows are merged automatically.
-- The schedule file is re-read from disk daily at `reload_time` — edit it without restarting.
+- The config file is re-read from disk daily at `reload_time` — edit it without restarting.
 - At each turn-on event, the content directory is rescanned for new or changed images.
 
 ## How It Works
 
 - Images are loaded from the content directory in filename order. Only changed files are re-decoded on reload.
-- Tiny thumbnails (default 80px, configurable via `-thumb-width`) are pre-loaded for instant keyboard navigation; full images are decoded on demand and scaled to the window.
+- Tiny thumbnails (default 80px, configurable via `thumb_width` in config) are pre-loaded for instant keyboard navigation; full images are decoded on demand and scaled to the window.
 - A generation counter prevents stale background loads from overwriting a newer slide.
 - All UI updates from background goroutines go through `fyne.Do()`.
 - The scheduler sleeps until the next event each day; CEC commands run via `cec-client -s`.
