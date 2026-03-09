@@ -89,16 +89,40 @@ func (dc DayConfig) windows(year int, month time.Month, day int, weekday time.We
 	return wins
 }
 
-// ScheduleConfig is the top-level TOML structure.
+// ScheduleConfig holds the per-day on/off windows and reload time.
 type ScheduleConfig struct {
 	ReloadTime *TimeOfDay `toml:"reload_time"` // HH:MM to auto-reload the schedule daily; defaults to "01:00"
-	Monday     DayConfig `toml:"monday"`
-	Tuesday    DayConfig `toml:"tuesday"`
-	Wednesday  DayConfig `toml:"wednesday"`
-	Thursday   DayConfig `toml:"thursday"`
-	Friday     DayConfig `toml:"friday"`
-	Saturday   DayConfig `toml:"saturday"`
-	Sunday     DayConfig `toml:"sunday"`
+	Monday     DayConfig  `toml:"monday"`
+	Tuesday    DayConfig  `toml:"tuesday"`
+	Wednesday  DayConfig  `toml:"wednesday"`
+	Thursday   DayConfig  `toml:"thursday"`
+	Friday     DayConfig  `toml:"friday"`
+	Saturday   DayConfig  `toml:"saturday"`
+	Sunday     DayConfig  `toml:"sunday"`
+}
+
+// SlideshowConfig holds slideshow display settings from the [slideshow] section.
+type SlideshowConfig struct {
+	Interval   Duration `toml:"interval"`    // time between slides, e.g. "30s", "1m"
+	ThumbWidth uint     `toml:"thumb_width"` // thumbnail width in pixels
+}
+
+// Duration wraps time.Duration with TOML string unmarshalling.
+type Duration time.Duration
+
+func (d *Duration) UnmarshalText(text []byte) error {
+	parsed, err := time.ParseDuration(string(text))
+	if err != nil {
+		return err
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// Config is the top-level TOML structure for config.toml.
+type Config struct {
+	Schedule  ScheduleConfig  `toml:"schedule"`
+	Slideshow SlideshowConfig `toml:"slideshow"`
 }
 
 func (cfg *ScheduleConfig) forWeekday(d time.Weekday) *DayConfig {
@@ -135,33 +159,34 @@ type Schedule struct {
 	onTurnOff func()
 }
 
-// LoadSchedule parses the TOML file at path and returns a Schedule.
-// onTurnOn is called at scheduled turn-on (use ss.Reload to reload content and un-pause).
-// onTurnOff is called at scheduled turn-off (use ss.Pause to blank the display).
-func LoadSchedule(path string, onTurnOn func(), onTurnOff func()) (*Schedule, error) {
+// LoadConfig parses the config.toml file at path and returns the full Config.
+func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading schedule: %w", err)
+		return nil, fmt.Errorf("reading config: %w", err)
 	}
-	var cfg ScheduleConfig
+	var cfg Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing schedule: %w", err)
+		return nil, fmt.Errorf("parsing config: %w", err)
 	}
-	return &Schedule{path: path, cfg: cfg, onTurnOn: onTurnOn, onTurnOff: onTurnOff}, nil
+	return &cfg, nil
 }
 
-// reload re-reads the schedule TOML from disk and updates the config atomically.
+// NewSchedule creates a Schedule from a ScheduleConfig.
+// onTurnOn is called at scheduled turn-on (use ss.Reload to reload content and un-pause).
+// onTurnOff is called at scheduled turn-off (use ss.Pause to blank the display).
+func NewSchedule(path string, cfg ScheduleConfig, onTurnOn func(), onTurnOff func()) *Schedule {
+	return &Schedule{path: path, cfg: cfg, onTurnOn: onTurnOn, onTurnOff: onTurnOff}
+}
+
+// reload re-reads config.toml from disk and updates the schedule config atomically.
 func (s *Schedule) reload() error {
-	data, err := os.ReadFile(s.path)
+	cfg, err := LoadConfig(s.path)
 	if err != nil {
-		return fmt.Errorf("reading schedule: %w", err)
-	}
-	var cfg ScheduleConfig
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parsing schedule: %w", err)
+		return fmt.Errorf("reloading config: %w", err)
 	}
 	s.mu.Lock()
-	s.cfg = cfg
+	s.cfg = cfg.Schedule
 	s.mu.Unlock()
 	log.Printf("schedule: reloaded from %s", s.path)
 	return nil

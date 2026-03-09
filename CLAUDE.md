@@ -19,7 +19,7 @@ Simple digital signage player that cycles through images in a `content/` subdire
 - `docs/INSTALL.md` — step-by-step Raspberry Pi setup guide (from imaging the SD card to running)
 - `docs/kit.jpg` — photo of recommended hardware kit
 - `.github/workflows/release.yaml` — CI: cross-compiles linux/amd64, arm64, arm on tag push; publishes GitHub Release
-- `content/` — runtime image directory and `schedule.toml` (not committed; `.gitignore`d)
+- `content/` — runtime image directory and `config.toml` (not committed; `.gitignore`d)
 - `go.mod` / `go.sum` — Go module dependencies
 - `mise.toml` — mise tool versions
 
@@ -45,7 +45,7 @@ Simple digital signage player that cycles through images in a `content/` subdire
 ## Architecture Notes
 
 - Images are stored as `[]Slide` (path, thumbnail, size, mtime). On `Reload`, unchanged files are reused without re-decoding.
-- Tiny thumbnails (default 80px wide, configurable via `-thumb-width` flag) are pre-loaded for instant keyboard navigation.
+- Tiny thumbnails (default 80px wide, configurable via `thumb_width` in `config.toml`) are pre-loaded for instant keyboard navigation.
 - Full images are decoded and scaled to the window size on demand (`decodeAndFit`), never held at full resolution.
 - A generation counter (`atomic.Int64`) prevents stale background loads from overwriting newer slides.
 - All off-main-thread UI updates go through `fyne.Do()`.
@@ -53,7 +53,7 @@ Simple digital signage player that cycles through images in a `content/` subdire
 - `Schedule` sleeps until each event; at turn-on it calls `ss.Reload` then `cec.TurnOn`; at turn-off it calls `ss.Pause` then `cec.TurnOff`.
 - `Slideshow.Pause()` blacks the screen and stops the ticker. Any nav key resumes (calls `onResume` → CEC TurnOn in a goroutine, then restarts the ticker). Delete key manually pauses (simulates schedule off).
 - `cec.go` wraps `cec-client -s -d 1`; graceful no-op if `cec-client` is not in `$PATH`.
-- The schedule file is auto-reloaded daily at a configurable time (default 01:00). `[[special]]` rules match an Nth weekday of the month and union their windows with the regular weekday windows.
+- The config file (`config.toml`) is auto-reloaded daily at a configurable time (default 01:00). Day configs support Nth-weekday-of-month occurrence fields that union their windows with the regular weekday windows.
 
 ## Deployment
 
@@ -65,4 +65,4 @@ Simple digital signage player that cycles through images in a `content/` subdire
 
 - Keep it simple — this is a single-purpose signage player.
 - Target platform is Linux but we want to support Windows too.
-- Images are loaded from the content directory at runtime (default `content/`, configurable via `-content` flag).
+- Images are loaded from the content directory at runtime (default `content/`, passed as a positional argument).
