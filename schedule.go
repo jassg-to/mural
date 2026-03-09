@@ -5,61 +5,119 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
-// Window is an on/off time pair in HH:MM format.
-type Window struct {
-	On  string `toml:"on"`
-	Off string `toml:"off"`
-}
+// TimeOfDay is minutes since midnight, parsed from "HH:MM".
+type TimeOfDay int
 
-// WeekdayConfig holds the default on/off windows for each day of the week.
-type WeekdayConfig struct {
-	Monday    []Window `toml:"monday"`
-	Tuesday   []Window `toml:"tuesday"`
-	Wednesday []Window `toml:"wednesday"`
-	Thursday  []Window `toml:"thursday"`
-	Friday    []Window `toml:"friday"`
-	Saturday  []Window `toml:"saturday"`
-	Sunday    []Window `toml:"sunday"`
-}
-
-func (wc *WeekdayConfig) forWeekday(d time.Weekday) []Window {
-	switch d {
-	case time.Monday:
-		return wc.Monday
-	case time.Tuesday:
-		return wc.Tuesday
-	case time.Wednesday:
-		return wc.Wednesday
-	case time.Thursday:
-		return wc.Thursday
-	case time.Friday:
-		return wc.Friday
-	case time.Saturday:
-		return wc.Saturday
-	default:
-		return wc.Sunday
+// UnmarshalText implements encoding.TextUnmarshaler for "HH:MM" strings.
+func (t *TimeOfDay) UnmarshalText(text []byte) error {
+	mins, err := parseHHMM(string(text))
+	if err != nil {
+		return err
 	}
+	*t = TimeOfDay(mins)
+	return nil
 }
 
-// SpecialRule adds extra on/off windows on specific occurrences of a weekday within a month.
-type SpecialRule struct {
-	Name       string   `toml:"name"`
-	Weekday    string   `toml:"weekday"`    // "Monday", "Tuesday", …
-	Occurrence int      `toml:"occurrence"` // 1 = first, -1 = last, etc.
-	Windows    []Window `toml:"windows"`
+// toTime returns the TimeOfDay as a time.Time on the given date.
+func (t TimeOfDay) toTime(year int, month time.Month, day int, loc *time.Location) time.Time {
+	return time.Date(year, month, day, int(t)/60, int(t)%60, 0, 0, loc)
+}
+
+// Window is an on/off pair, parsed from "HH:MM-HH:MM".
+type Window struct {
+	On  TimeOfDay
+	Off TimeOfDay
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler so TOML strings
+// like "18:30-19:15" decode directly into a Window.
+func (w *Window) UnmarshalText(text []byte) error {
+	s := string(text)
+	onStr, offStr, ok := strings.Cut(s, "-")
+	if !ok {
+		return fmt.Errorf("invalid window %q: missing '-'", s)
+	}
+	if err := w.On.UnmarshalText([]byte(onStr)); err != nil {
+		return err
+	}
+	if err := w.Off.UnmarshalText([]byte(offStr)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DayConfig holds the on/off windows for a single day of the week,
+// grouped by occurrence within the month.
+type DayConfig struct {
+	All    []Window `toml:"all"`
+	First  []Window `toml:"first"`
+	Second []Window `toml:"second"`
+	Third  []Window `toml:"third"`
+	Fourth []Window `toml:"fourth"`
+	Last   []Window `toml:"last"`
+}
+
+// windows returns the applicable windows for the given day of the month.
+func (dc DayConfig) windows(year int, month time.Month, day int, weekday time.Weekday) []Window {
+	wins := append([]Window{}, dc.All...)
+	type occField struct {
+		n    int
+		list []Window
+	}
+	for _, of := range []occField{
+		{1, dc.First},
+		{2, dc.Second},
+		{3, dc.Third},
+		{4, dc.Fourth},
+		{-1, dc.Last},
+	} {
+		if len(of.list) == 0 {
+			continue
+		}
+		nth, ok := nthWeekdayOfMonth(year, month, weekday, of.n)
+		if ok && nth.Day() == day {
+			wins = append(wins, of.list...)
+		}
+	}
+	return wins
 }
 
 // ScheduleConfig is the top-level TOML structure.
 type ScheduleConfig struct {
-	Weekday    WeekdayConfig `toml:"weekday"`
-	Special    []SpecialRule `toml:"special"`
-	ReloadTime string        `toml:"reload_time"` // HH:MM to auto-reload the schedule daily; defaults to "01:00"
+	ReloadTime *TimeOfDay `toml:"reload_time"` // HH:MM to auto-reload the schedule daily; defaults to "01:00"
+	Monday     DayConfig `toml:"monday"`
+	Tuesday    DayConfig `toml:"tuesday"`
+	Wednesday  DayConfig `toml:"wednesday"`
+	Thursday   DayConfig `toml:"thursday"`
+	Friday     DayConfig `toml:"friday"`
+	Saturday   DayConfig `toml:"saturday"`
+	Sunday     DayConfig `toml:"sunday"`
+}
+
+func (cfg *ScheduleConfig) forWeekday(d time.Weekday) *DayConfig {
+	switch d {
+	case time.Monday:
+		return &cfg.Monday
+	case time.Tuesday:
+		return &cfg.Tuesday
+	case time.Wednesday:
+		return &cfg.Wednesday
+	case time.Thursday:
+		return &cfg.Thursday
+	case time.Friday:
+		return &cfg.Friday
+	case time.Saturday:
+		return &cfg.Saturday
+	default:
+		return &cfg.Sunday
+	}
 }
 
 // event is a single scheduled CEC action.
@@ -116,19 +174,14 @@ func (s *Schedule) Start() {
 		for {
 			now := time.Now()
 			s.mu.RLock()
-			reloadTime := s.cfg.ReloadTime
+			rt := s.cfg.ReloadTime
 			s.mu.RUnlock()
-			if reloadTime == "" {
-				reloadTime = "01:00"
-			}
-			mins, err := parseHHMM(reloadTime)
-			if err != nil {
-				log.Printf("schedule: invalid reload_time %q: %v; using 01:00", reloadTime, err)
-				mins = 60
+			defaultRT := TimeOfDay(60) // 01:00
+			if rt == nil {
+				rt = &defaultRT
 			}
 			year, month, day := now.Date()
-			loc := now.Location()
-			next := time.Date(year, month, day, mins/60, mins%60, 0, 0, loc)
+			next := rt.toTime(year, month, day, now.Location())
 			if !next.After(now) {
 				next = next.AddDate(0, 0, 1)
 			}
@@ -191,58 +244,34 @@ func (s *Schedule) eventsForDate(t time.Time) []event {
 
 	year, month, day := t.Date()
 	weekday := t.Weekday()
+	dc := cfg.forWeekday(weekday)
 
-	windows := append([]Window{}, cfg.Weekday.forWeekday(weekday)...)
-
-	for _, rule := range cfg.Special {
-		ruleDay, ok := parseWeekday(rule.Weekday)
-		if !ok {
-			log.Printf("schedule: unknown weekday %q in special rule %q", rule.Weekday, rule.Name)
-			continue
-		}
-		nth, ok := nthWeekdayOfMonth(year, month, ruleDay, rule.Occurrence)
-		if ok && nth.Day() == day {
-			windows = append(windows, rule.Windows...)
-		}
-	}
-
-	return windowsToEvents(t, windows)
+	return windowsToEvents(t, dc.windows(year, month, day, weekday))
 }
 
-// windowsToEvents converts a slice of Window values into a sorted, merged list of events
-// anchored to the calendar day of base.
+// windowsToEvents converts a slice of Window values into a sorted, merged
+// list of events anchored to the calendar day of base.
 func windowsToEvents(base time.Time, windows []Window) []event {
-	type interval struct{ on, off int } // minutes since midnight
-
-	var intervals []interval
-	for _, w := range windows {
-		on, err1 := parseHHMM(w.On)
-		off, err2 := parseHHMM(w.Off)
-		if err1 != nil || err2 != nil {
-			log.Printf("schedule: invalid window %q-%q: %v %v", w.On, w.Off, err1, err2)
-			continue
-		}
-		intervals = append(intervals, interval{on, off})
-	}
-
-	if len(intervals) == 0 {
+	if len(windows) == 0 {
 		return nil
 	}
 
-	sort.Slice(intervals, func(i, j int) bool {
-		return intervals[i].on < intervals[j].on
+	sorted := make([]Window, len(windows))
+	copy(sorted, windows)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].On < sorted[j].On
 	})
 
-	// merge overlapping/adjacent intervals
-	merged := intervals[:1]
-	for _, iv := range intervals[1:] {
+	// merge overlapping/adjacent windows
+	merged := sorted[:1]
+	for _, w := range sorted[1:] {
 		last := &merged[len(merged)-1]
-		if iv.on <= last.off {
-			if iv.off > last.off {
-				last.off = iv.off
+		if w.On <= last.Off {
+			if w.Off > last.Off {
+				last.Off = w.Off
 			}
 		} else {
-			merged = append(merged, iv)
+			merged = append(merged, w)
 		}
 	}
 
@@ -250,11 +279,9 @@ func windowsToEvents(base time.Time, windows []Window) []event {
 	loc := base.Location()
 
 	var events []event
-	for _, iv := range merged {
-		onTime := time.Date(year, month, day, iv.on/60, iv.on%60, 0, 0, loc)
-		offTime := time.Date(year, month, day, iv.off/60, iv.off%60, 0, 0, loc)
-		events = append(events, event{at: onTime, turnOn: true})
-		events = append(events, event{at: offTime, turnOn: false})
+	for _, w := range merged {
+		events = append(events, event{at: w.On.toTime(year, month, day, loc), turnOn: true})
+		events = append(events, event{at: w.Off.toTime(year, month, day, loc), turnOn: false})
 	}
 	return events
 }
@@ -269,28 +296,6 @@ func parseHHMM(s string) (int, error) {
 		return 0, fmt.Errorf("time out of range: %q", s)
 	}
 	return h*60 + m, nil
-}
-
-// parseWeekday maps a weekday name to time.Weekday.
-func parseWeekday(s string) (time.Weekday, bool) {
-	switch s {
-	case "Sunday":
-		return time.Sunday, true
-	case "Monday":
-		return time.Monday, true
-	case "Tuesday":
-		return time.Tuesday, true
-	case "Wednesday":
-		return time.Wednesday, true
-	case "Thursday":
-		return time.Thursday, true
-	case "Friday":
-		return time.Friday, true
-	case "Saturday":
-		return time.Saturday, true
-	default:
-		return 0, false
-	}
 }
 
 // nthWeekdayOfMonth returns the date of the nth occurrence of weekday in year/month.

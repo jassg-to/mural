@@ -51,14 +51,27 @@ if [ ! -f "$CONTENT_DIR/schedule.toml" ]; then
   cat > "$CONTENT_DIR/schedule.toml" <<'EOF'
 reload_time = "01:00"  # reload this file daily at this time (HH:MM)
 
-[weekday]
-monday    = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-tuesday   = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-wednesday = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-thursday  = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-friday    = [{ on = "08:00", off = "12:00" }, { on = "13:30", off = "22:00" }]
-saturday  = [{ on = "10:00", off = "18:00" }]
-sunday    = []   # off all day
+[monday]
+all = [ "08:00-12:00", "13:30-22:00" ]
+
+[tuesday]
+all = [ "08:00-12:00", "13:30-22:00" ]
+
+[wednesday]
+all = [ "08:00-12:00", "13:30-22:00" ]
+
+[thursday]
+all = [ "08:00-12:00", "13:30-22:00" ]
+second = [ "07:00-08:00" ]
+
+[friday]
+all = [ "08:00-12:00", "13:30-22:00" ]
+
+[saturday]
+all = [ "10:00-18:00" ]
+last = [ "18:00-22:00"]
+
+# sunday: off all day (no section needed)
 EOF
 fi
 
