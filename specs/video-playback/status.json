@@ -1,0 +1,11 @@
+{
+  "feature": "video-playback",
+  "status": "ready",
+  "current_step": 0,
+  "total_steps": 28,
+  "completed_steps": [],
+  "errors": [
+    "GATE BEFORE PHASE 4 — unresolved cross-spec collision with specs/usb-stick-hotplug/. Both features rewrite Reload, scanSlides, and Run()'s empty-directory contract, and both touch main.go wiring. usb-stick-hotplug also makes s.interval runtime-mutable, which races advanceDuration on the main goroutine, and currently treats a video-only USB stick as 'no supported images'. Sequence the two features or jointly architect ownership of those three surfaces before invoking sdd-coder on either. Detail in CriticReview.md, first section."
+  ],
+  "notes": "Phase 1 + Phase 2 + Phase 3 (two-round critic) all complete. Round 1 (self-critique): 8 blockers + 9 warnings + 4 notes. Round 2 (fresh-eyes): 5 blockers + 9 warnings + 5 notes, including two crash-class defects (V2, V3) that Round 1's own fixes introduced. Plus an empirical verification pass on ffmpeg/ffprobe 8.1.2 that falsified three Round 1 fixes (the '--' terminator, the 'fps=30' cap, and the duplicated -show_entries claim) and inverted Phase 2's advance-on-EOS timing model after measuring -re finishing ~0.5s early on every clip. All applied. Steps 25 -> 28. Spec is internally implementation-ready; see errors[] for the cross-spec gate."
+}
