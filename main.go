@@ -34,7 +34,8 @@ func main() {
 	}
 
 	cec := NewCEC()
-	ss := NewSlideshow(contentDir, interval, thumbWidth, cec)
+	vid := NewVideo()
+	ss := NewSlideshow(contentDir, interval, thumbWidth, cec, vid)
 
 	sched := NewSchedule(configPath, cfg.Schedule, ss.Reload, ss.Pause)
 	ss.startPaused = !sched.IsOn(time.Now())
