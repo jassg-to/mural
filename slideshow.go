@@ -350,14 +350,25 @@ func (s *Slideshow) scheduleAdvance(d time.Duration) {
 }
 
 // advanceToNext shows the next slide (auto-advance, no thumbnail flash).
-// When the rotation has only one slide, it enforces minReplayGap between
-// consecutive playback starts rather than clamping or extending the clip
-// itself. Must be called from the Fyne main goroutine.
+// When the rotation is a single video slide re-showing itself, it enforces
+// minReplayGap between consecutive playback starts rather than clamping or
+// extending the clip itself. Image slides are never subject to this floor,
+// preserving their pre-existing timing exactly (Architect.md warning W7).
+// Must be called from the Fyne main goroutine.
 func (s *Slideshow) advanceToNext() {
 	n := len(s.slides)
 	idx := (s.current + 1) % n
-	if n == 1 {
+	if n == 1 && s.slides[idx].kind == slideKindVideo {
 		if gap := minReplayGap - time.Since(s.lastShowStart); gap > 0 {
+			// Stop whatever timer is currently armed (e.g. a still-pending
+			// watchdog from the slide that just finished) before replacing
+			// it — otherwise it survives un-stopped and can fire later,
+			// calling advanceToNext() a second time with nothing to catch
+			// the duplicate (show()'s scheduleAdvance normally does this
+			// cleanup, but this branch deliberately bypasses show()).
+			if s.advanceTimer != nil {
+				s.advanceTimer.Stop()
+			}
 			s.advanceTimer = time.AfterFunc(gap, func() {
 				fyne.Do(func() {
 					if s.paused {
