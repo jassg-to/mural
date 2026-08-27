@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/jassg-to/mural/main/install.sh | ba
 ```
 
 The installer will:
-- Install required packages (`xinit`, `ratpoison`, `cec-utils`)
+- Install required packages (`xinit`, `ratpoison`, `cec-utils`, `ffmpeg`)
 - Download the `mural` binary
 - Set up your window manager config
 - Create `~/mural/content/` with a sample schedule
@@ -48,11 +48,15 @@ The installer will:
 
 ## Add Your Images
 
-If you enabled Samba during installation, open your file manager on any computer on the same network and go to `\\<pi-ip-address>\content`. You can drag and drop images directly.
+If you enabled Samba during installation, open your file manager on any computer on the same network and go to `\\<pi-ip-address>\content`. You can drag and drop images and videos directly.
 
-Otherwise, copy JPG or PNG images into `~/mural/content/` over SSH or with a USB drive.
+Otherwise, copy JPG or PNG images, or MP4 (H.264) videos, into `~/mural/content/` over SSH or with a USB drive.
+
+Videos play muted, once, for their own exact length (not the configured slide `interval`), and their thumbnail is their first frame. A video that fails to decode is skipped and logged rather than shown — see *Troubleshooting* below.
 
 Optionally edit `~/mural/content/config.toml` to set slideshow settings and the hours when the display should be on.
+
+**Upgrading an existing install:** if you set up Mural before video support existed, video playback needs `ffmpeg` on the Pi, which `install.sh` only installs for new setups. Run `sudo apt install ffmpeg` once to pick it up — no reinstall or reboot needed, and image-only content keeps working unchanged either way.
 
 
 ## Run
@@ -77,3 +81,12 @@ curl -fsSL https://raw.githubusercontent.com/jassg-to/mural/main/install.sh | ba
 ```
 
 Make sure you are logged in directly on the console (not over SSH) so the installer can detect the tty and offer the full setup.
+
+
+## Troubleshooting Video Playback
+
+**A video isn't appearing in the rotation.** Mural logs why (wrong codec, corrupt file, unreadable duration) with `log.Printf`, but `.xinitrc` launches `./mural` with no output redirection, so on a normal boot that log line goes to a tty nobody is watching. To see it: SSH into the Pi, `cd ~/mural`, and run `./mural` directly — the same log lines print to your SSH session.
+
+**A video is dropping frames or stuttering.** On less powerful hardware (older Pi models, especially at 1080p), frame delivery is designed to degrade gracefully — it drops frames and keeps real time rather than falling behind or crashing. If that's not good enough, re-encode the source clip at a lower resolution before copying it in; there's no in-app quality setting.
+
+**Reverting video playback entirely.** If video playback is causing problems on a running kiosk, `sudo apt remove ffmpeg` reverts Mural to exactly its pre-video, image-only behaviour immediately — no redeploy or reboot required. Every `.mp4` file is then skipped at the next content scan. Reinstall with `sudo apt install ffmpeg` to bring video support back.

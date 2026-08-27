@@ -9,7 +9,7 @@ CURRENT_USER=$(id -un)
 # ── 1. System packages ────────────────────────────────────────────────────────
 echo "Installing system packages..."
 sudo apt update
-sudo apt install -y xinit ratpoison cec-utils libgl1 unclutter x11-xserver-utils
+sudo apt install -y xinit ratpoison cec-utils libgl1 unclutter x11-xserver-utils ffmpeg
 
 # ── 2. Binary from GitHub Releases ───────────────────────────────────────────
 ARCH=$(uname -m)
@@ -85,7 +85,7 @@ echo ""
 echo "mural installed successfully."
 echo ""
 echo "Next steps:"
-echo "  1. Copy images (JPG/PNG) into $CONTENT_DIR"
+echo "  1. Copy images (JPG/PNG) or MP4 (H.264) videos into $CONTENT_DIR"
 echo "  2. Edit $CONTENT_DIR/config.toml to set your display hours and slideshow settings"
 echo "  3. Type 'startx' to launch"
 echo ""
