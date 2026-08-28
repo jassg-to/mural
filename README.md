@@ -1,6 +1,6 @@
 # Mural
 
-A digital signage player built with [Fyne](https://fyne.io/). Cycles through images (and MP4 videos) in a content directory, with a daily schedule for display on/off times and HDMI CEC control. Optimized for Raspberry Pi.
+A digital signage player built with [Fyne](https://fyne.io/). Cycles through images in a content directory, with a daily schedule for display on/off times and HDMI CEC control. Optimized for Raspberry Pi.
 
 ## Quick Install (Raspberry Pi)
 
@@ -15,16 +15,13 @@ This downloads the latest pre-built binary, installs dependencies, and sets up t
 - Go 1.25+ (only needed if building from source)
 - GCC (for CGo/Fyne) — on Windows, install via [MSYS2](https://www.msys2.org/) or [TDM-GCC](https://jmeubank.github.io/tdm-gcc/)
 - `cec-client` on the PATH for HDMI CEC control (optional; no-op if absent)
-- `ffmpeg`/`ffprobe` on the PATH for MP4 video slides (optional; `.mp4` files are silently skipped, with a log line, if absent — Windows: `ffmpeg.exe`/`ffprobe.exe` on PATH work the same way)
-
-**Existing installs:** if you installed Mural before video support was added, run `sudo apt install ffmpeg` to pick it up — `install.sh` only adds it for new installs, and the running binary won't complain about missing videos anywhere you'll see it (see *Video playback* below).
 
 ## Usage
 
 ```bash
 go build .
 mkdir -p content
-# Place your .jpg / .jpeg / .png images and/or .mp4 (H.264) videos in content/
+# Place your .jpg / .jpeg / .png images in content/
 # Create a schedule (see below)
 ./mural
 ```
@@ -82,21 +79,13 @@ last = [ "18:00-22:00" ]  # extra hours on the last Saturday of the month
 
 ## How It Works
 
-- Images and videos are loaded from the content directory in filename order. Only changed files are re-decoded on reload.
+- Images are loaded from the content directory in filename order. Only changed files are re-decoded on reload.
 - Tiny thumbnails (default 80px, configurable via `thumb_width` in config) are pre-loaded for instant keyboard navigation; full images are decoded on demand and scaled to the window.
 - A generation counter prevents stale background loads from overwriting a newer slide.
 - All UI updates from background goroutines go through `fyne.Do()`.
 - The scheduler sleeps until the next event each day; CEC commands run via `cec-client -s`.
 
-### Video playback
-
-- Supported: MP4 (H.264) only. A video's thumbnail is its first frame; its on-screen duration is its own exact playback length, not the configured `interval` — `interval` continues to govern image slides only.
-- Playback is always muted; there is no audio configuration.
-- A video plays once per showing and always restarts from the beginning — there's no mid-playback resume after a pause or interrupt, matching how image slides are redisplayed.
-- An `.mp4` that fails to decode (wrong codec, corrupt file, no video stream) is excluded from the rotation and logged; it never halts the slideshow.
-- **Kill switch:** if video playback misbehaves on a running kiosk, `sudo apt remove ffmpeg` (or otherwise removing `ffmpeg`/`ffprobe` from PATH) reverts Mural to exactly its image-only behaviour with no redeploy needed — every `.mp4` is then skipped at scan time.
-- **Underpowered hardware:** frame delivery is designed to degrade — on hardware that can't keep up, frames are dropped and playback stays real-time rather than falling behind or crashing. If a device still struggles (e.g. an older Pi with 1080p clips), re-encode the source video at a lower resolution; there's no in-app quality setting.
-- **Reading the logs:** `.xinitrc` runs `./mural` with no output redirection, so log lines (including "video skipped" messages) go to a tty nobody watches during normal kiosk operation. To see them, log in over SSH and run `./mural` directly from `~/mural`.
+> Video playback is intentionally out of scope for this Go codebase. A future "Kodi launcher mode" is the planned path for video — mural handing off to an externally-managed Kodi process rather than decoding video itself — not yet implemented. See `specs/nixos-deployment/spike-findings.md` for the hardware findings that motivated this.
 
 ## Development
 
