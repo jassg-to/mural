@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,61 +21,23 @@ import (
 	"github.com/nfnt/resize"
 )
 
-// minReplayGap is the minimum time between consecutive playback starts when
-// a lone video slide advances to itself. It does not clamp or extend the
-// clip's own duration; it only stops a sub-second clip from spawning
-// ffmpeg dozens of times a second.
-const minReplayGap = 1 * time.Second
-
 var imageExts = map[string]bool{
 	".jpg":  true,
 	".jpeg": true,
 	".png":  true,
 }
 
-var videoExts = map[string]bool{
-	".mp4": true,
-}
-
-type slideKindT int
-
-const (
-	slideKindImage slideKindT = iota
-	slideKindVideo
-)
-
-// slideKind classifies a file extension (case-insensitive). ok is false for
-// an extension that is neither a recognized image nor video type.
-func slideKind(ext string) (kind slideKindT, ok bool) {
-	ext = strings.ToLower(ext)
-	switch {
-	case imageExts[ext]:
-		return slideKindImage, true
-	case videoExts[ext]:
-		return slideKindVideo, true
-	default:
-		return 0, false
-	}
+// isImageExt reports whether ext (case-insensitive) is a recognized image
+// file extension.
+func isImageExt(ext string) bool {
+	return imageExts[strings.ToLower(ext)]
 }
 
 // Slide holds a content file's path along with its cached thumbnail and the
 // file stats used to detect whether the file has changed since last load.
-// duration/vidW/vidH are zero for image slides.
 type Slide struct {
-	path     string
-	kind     slideKindT
-	thumb    image.Image
-	duration time.Duration
-	vidW     int
-	vidH     int
-	size     int64
-	mtime    time.Time
-}
-
-// rejectedEntry records a file that failed video probing/first-frame
-// extraction, keyed the same way as the positive reuse cache, so an
-// unchanged bad file is not re-probed on every scan.
-type rejectedEntry struct {
+	path  string
+	thumb image.Image
 	size  int64
 	mtime time.Time
 }
@@ -95,19 +55,19 @@ func loadThumbnail(path string, width uint) image.Image {
 	return resize.Resize(width, 0, src, resize.Lanczos3)
 }
 
-// scanSlides scans dir for images and videos and returns a []Slide plus the
-// updated negative-result (rejected) cache. existing slides and rejected
-// entries whose path, size, and mtime are unchanged are reused as-is.
+// scanSlides scans dir for images and returns a []Slide. existing slides
+// whose path, size, and mtime are unchanged are reused as-is, without
+// re-decoding a thumbnail.
 //
-// existing and prevRejected are snapshots passed in by the caller and never
-// mutated in place: scanSlides runs from Run() on the Fyne main goroutine
-// and from Reload() on a background goroutine, so a shared mutable map
-// would be a concurrent map write — an unrecoverable Go runtime fatal, not
-// a benign race.
-func (s *Slideshow) scanSlides(existing []Slide, prevRejected map[string]rejectedEntry) ([]Slide, map[string]rejectedEntry, error) {
+// existing is a snapshot passed in by the caller and never mutated in
+// place: scanSlides runs from Run() on the Fyne main goroutine and from
+// Reload() on a background goroutine, so a shared mutable map would be a
+// concurrent map write — an unrecoverable Go runtime fatal, not a benign
+// race.
+func (s *Slideshow) scanSlides(existing []Slide) ([]Slide, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading content directory: %w", err)
+		return nil, fmt.Errorf("reading content directory: %w", err)
 	}
 
 	prev := make(map[string]Slide, len(existing))
@@ -115,16 +75,13 @@ func (s *Slideshow) scanSlides(existing []Slide, prevRejected map[string]rejecte
 		prev[sl.path] = sl
 	}
 
-	rejected := make(map[string]rejectedEntry)
-
 	var slides []Slide
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
 		ext := filepath.Ext(e.Name())
-		kind, ok := slideKind(ext)
-		if !ok {
+		if !isImageExt(ext) {
 			continue
 		}
 		path := filepath.Join(s.dir, e.Name())
@@ -138,46 +95,18 @@ func (s *Slideshow) scanSlides(existing []Slide, prevRejected map[string]rejecte
 			slides = append(slides, old)
 			continue
 		}
-		if rej, ok := prevRejected[path]; ok && rej.size == size && rej.mtime.Equal(mtime) {
-			rejected[path] = rej
-			continue
-		}
 
-		switch kind {
-		case slideKindVideo:
-			vinfo, err := s.vid.probe(path)
-			if err != nil {
-				log.Printf("skipping video %s: %v", path, err)
-				rejected[path] = rejectedEntry{size: size, mtime: mtime}
-				continue
-			}
-			thumb, err := s.vid.firstFrame(path, s.thumbWidth)
-			if err != nil {
-				log.Printf("skipping video %s: %v", path, err)
-				rejected[path] = rejectedEntry{size: size, mtime: mtime}
-				continue
-			}
-			slides = append(slides, Slide{
-				path:     path,
-				kind:     slideKindVideo,
-				thumb:    thumb,
-				duration: vinfo.duration,
-				vidW:     vinfo.width,
-				vidH:     vinfo.height,
-				size:     size,
-				mtime:    mtime,
-			})
-		default:
-			slides = append(slides, Slide{
-				path:  path,
-				kind:  slideKindImage,
-				thumb: loadThumbnail(path, s.thumbWidth),
-				size:  size,
-				mtime: mtime,
-			})
-		}
+		// A corrupt image is still included in the rotation with a nil
+		// thumbnail rather than being excluded (loadThumbnail returns nil
+		// silently on decode failure).
+		slides = append(slides, Slide{
+			path:  path,
+			thumb: loadThumbnail(path, s.thumbWidth),
+			size:  size,
+			mtime: mtime,
+		})
 	}
-	return slides, rejected, nil
+	return slides, nil
 }
 
 func decodeAndFit(path string, width, height float32) (image.Image, error) {
@@ -202,20 +131,8 @@ func decodeAndFit(path string, width, height float32) (image.Image, error) {
 	return resize.Resize(targetW, targetH, src, resize.Lanczos3), nil
 }
 
-// advanceDuration returns how long a slide should remain on screen before
-// auto-advancing: interval for an image slide, the slide's own probed
-// duration for a video slide. interval must never govern a video slide.
-// Pure function; the seam that makes advance-duration selection testable
-// without a live Fyne canvas.
-func advanceDuration(sl Slide, interval time.Duration) time.Duration {
-	if sl.kind == slideKindVideo {
-		return sl.duration
-	}
-	return interval
-}
-
-// Slideshow loads images and videos from dir and displays them as a
-// fullscreen slideshow.
+// Slideshow loads images from dir and displays them as a fullscreen
+// slideshow.
 type Slideshow struct {
 	dir        string
 	interval   time.Duration
@@ -223,24 +140,20 @@ type Slideshow struct {
 
 	// fields below are set during Run and accessed only on the Fyne main goroutine,
 	// except via Pause/Reload which marshal through fyne.Do.
-	slides        []Slide
-	rejected      map[string]rejectedEntry
-	current       int
-	paused        bool
-	generation    atomic.Int64
-	img           *canvas.Image
-	advanceTimer  *time.Timer
-	playerCancel  context.CancelFunc
-	lastShowStart time.Time
-	winSize       func() fyne.Size
+	slides       []Slide
+	current      int
+	paused       bool
+	generation   atomic.Int64
+	img          *canvas.Image
+	advanceTimer *time.Timer
+	winSize      func() fyne.Size
 
 	cec         *CEC
-	vid         *Video
 	startPaused bool
 }
 
-func NewSlideshow(dir string, interval time.Duration, thumbWidth uint, cec *CEC, vid *Video) *Slideshow {
-	return &Slideshow{dir: dir, interval: interval, thumbWidth: thumbWidth, cec: cec, vid: vid}
+func NewSlideshow(dir string, interval time.Duration, thumbWidth uint, cec *CEC) *Slideshow {
+	return &Slideshow{dir: dir, interval: interval, thumbWidth: thumbWidth, cec: cec}
 }
 
 // Pause stops the slideshow, blacks out the display, and turns off the
@@ -249,12 +162,11 @@ func (s *Slideshow) Pause() {
 	fyne.Do(s.pause)
 }
 
-// pause blacks out the display, stops any playback and the advance timer,
-// and sends CEC standby. Must be called from the Fyne main goroutine.
+// pause blacks out the display, stops the advance timer, and sends CEC
+// standby. Must be called from the Fyne main goroutine.
 func (s *Slideshow) pause() {
 	s.paused = true
 	s.generation.Add(1) // cancel any in-flight background load
-	s.stopPlayback()
 	if s.advanceTimer != nil {
 		s.advanceTimer.Stop()
 	}
@@ -269,10 +181,8 @@ func (s *Slideshow) pause() {
 	}()
 }
 
-// resume un-pauses, redisplays the current slide from the beginning (a
-// video slide always restarts rather than resuming mid-playback, matching
-// how image slides are redisplayed), and sends CEC power-on. Must be
-// called from the Fyne main goroutine.
+// resume un-pauses, redisplays the current slide, and sends CEC power-on.
+// Must be called from the Fyne main goroutine.
 func (s *Slideshow) resume() {
 	s.paused = false
 	if s.img != nil {
@@ -285,31 +195,18 @@ func (s *Slideshow) resume() {
 	}()
 }
 
-// stopPlayback cancels any active video playback, killing the ffmpeg
-// process, and clears playerCancel. Safe to call with no active playback.
-// Must be called from the Fyne main goroutine — playerCancel is written
-// only there; a caller on another goroutine must wrap this in fyne.Do.
-func (s *Slideshow) stopPlayback() {
-	if s.playerCancel != nil {
-		s.playerCancel()
-		s.playerCancel = nil
-	}
-}
-
 // Reload rescans the content directory, resets to slide 0, and un-pauses.
 // Safe to call from any goroutine.
 func (s *Slideshow) Reload() {
-	// Snapshot current slides/rejected set on the main goroutine so
-	// scanSlides can reuse unchanged entries without a lock.
+	// Snapshot current slides on the main goroutine so scanSlides can reuse
+	// unchanged entries without a lock.
 	var existing []Slide
-	var prevRejected map[string]rejectedEntry
 	fyne.Do(func() {
 		existing = make([]Slide, len(s.slides))
 		copy(existing, s.slides)
-		prevRejected = s.rejected
 	})
 
-	slides, rejected, err := s.scanSlides(existing, prevRejected)
+	slides, err := s.scanSlides(existing)
 	if err != nil {
 		log.Printf("slideshow reload: %v", err)
 		return
@@ -319,13 +216,7 @@ func (s *Slideshow) Reload() {
 		return
 	}
 	fyne.Do(func() {
-		// Stop any in-flight playback before the slide slice is replaced,
-		// in the same main-goroutine critical section as the swap —
-		// Reload runs on a background goroutine, so a bare stopPlayback()
-		// here would race show()'s writes to playerCancel.
-		s.stopPlayback()
 		s.slides = slides
-		s.rejected = rejected
 		s.current = 0
 		s.resume()
 	})
@@ -350,36 +241,10 @@ func (s *Slideshow) scheduleAdvance(d time.Duration) {
 }
 
 // advanceToNext shows the next slide (auto-advance, no thumbnail flash).
-// When the rotation is a single video slide re-showing itself, it enforces
-// minReplayGap between consecutive playback starts rather than clamping or
-// extending the clip itself. Image slides are never subject to this floor,
-// preserving their pre-existing timing exactly (Architect.md warning W7).
 // Must be called from the Fyne main goroutine.
 func (s *Slideshow) advanceToNext() {
 	n := len(s.slides)
 	idx := (s.current + 1) % n
-	if n == 1 && s.slides[idx].kind == slideKindVideo {
-		if gap := minReplayGap - time.Since(s.lastShowStart); gap > 0 {
-			// Stop whatever timer is currently armed (e.g. a still-pending
-			// watchdog from the slide that just finished) before replacing
-			// it — otherwise it survives un-stopped and can fire later,
-			// calling advanceToNext() a second time with nothing to catch
-			// the duplicate (show()'s scheduleAdvance normally does this
-			// cleanup, but this branch deliberately bypasses show()).
-			if s.advanceTimer != nil {
-				s.advanceTimer.Stop()
-			}
-			s.advanceTimer = time.AfterFunc(gap, func() {
-				fyne.Do(func() {
-					if s.paused {
-						return
-					}
-					s.show(idx, false)
-				})
-			})
-			return
-		}
-	}
 	s.show(idx, false)
 }
 
@@ -390,29 +255,19 @@ func (s *Slideshow) advanceToNext() {
 // instant=false swaps straight to the finished frame with no thumbnail
 // flash (auto-advance) — this preserves pre-existing visible behaviour now
 // that decoding always happens off the UI thread (previously the ticker
-// goroutine decoded inline inside fyne.Do). A video slide always shows its
-// first-frame thumbnail while ffmpeg warms up, regardless of instant, per
-// the Delta.
+// goroutine decoded inline inside fyne.Do).
 func (s *Slideshow) show(index int, instant bool) {
-	s.stopPlayback()
 	s.current = index
-	s.lastShowStart = time.Now()
 	gen := s.generation.Add(1)
 	sl := s.slides[index]
 
-	if (instant || sl.kind == slideKindVideo) && sl.thumb != nil {
+	if instant && sl.thumb != nil {
 		s.img.Image = sl.thumb
 		s.img.Refresh()
 	}
 
-	d := advanceDuration(sl, s.interval)
-	if sl.kind == slideKindVideo {
-		s.startVideoPlayback(sl, gen)
-		d += watchdogGrace
-	} else {
-		s.startImageDecode(sl.path, gen)
-	}
-	s.scheduleAdvance(d)
+	s.startImageDecode(sl.path, gen)
+	s.scheduleAdvance(s.interval)
 }
 
 // startImageDecode decodes and fits path in the background, then swaps it
@@ -442,88 +297,9 @@ func (s *Slideshow) startImageDecode(path string, gen int64) {
 	}()
 }
 
-// startVideoPlayback starts sl's playback under a cancellable context
-// stored in playerCancel, streaming frames into s.img through a
-// single-slot latest-frame-wins handoff (Architect.md: Frame delivery) so
-// that hardware which cannot keep up drops frames and stays real-time
-// instead of queuing fyne.Do closures until it dies.
-//
-// A video slide advances at max(end-of-stream, probed duration): ffmpeg's
-// -re pacing measurably finishes slightly early, so onDone alone would cut
-// every clip short. If playback finishes before sl.duration has elapsed
-// since the slide was shown, the advance is deferred to the duration mark
-// instead of firing immediately.
-func (s *Slideshow) startVideoPlayback(sl Slide, gen int64) {
-	ctx, cancel := context.WithCancel(context.Background())
-	s.playerCancel = cancel
-
-	sz := s.winSize()
-	w, h := fitDimensions(sl.vidW, sl.vidH, sz.Width, sz.Height)
-
-	var mu sync.Mutex
-	var pending image.Image
-	var drainScheduled bool
-
-	onFrame := func(frame image.Image) {
-		mu.Lock()
-		pending = frame
-		alreadyScheduled := drainScheduled
-		drainScheduled = true
-		mu.Unlock()
-		if alreadyScheduled {
-			return
-		}
-		fyne.Do(func() {
-			mu.Lock()
-			f := pending
-			pending = nil
-			drainScheduled = false
-			mu.Unlock()
-			if s.generation.Load() != gen {
-				return
-			}
-			s.img.Image = f
-			s.img.Refresh()
-		})
-	}
-
-	onDone := func(err error) {
-		if err != nil && ctx.Err() == nil {
-			log.Printf("video %s: playback: %v", sl.path, err)
-		}
-		fyne.Do(func() {
-			if s.generation.Load() != gen || s.paused {
-				return
-			}
-			remaining := sl.duration - time.Since(s.lastShowStart)
-			if remaining <= 0 {
-				s.advanceToNext()
-				return
-			}
-			// Playback finished before the probed duration elapsed (the
-			// common case, per measurement) — hold the last frame and
-			// defer the advance to the duration mark instead of cutting
-			// the clip short.
-			if s.advanceTimer != nil {
-				s.advanceTimer.Stop()
-			}
-			s.advanceTimer = time.AfterFunc(remaining, func() {
-				fyne.Do(func() {
-					if s.generation.Load() != gen || s.paused {
-						return
-					}
-					s.advanceToNext()
-				})
-			})
-		})
-	}
-
-	go s.vid.play(ctx, sl.path, w, h, onFrame, onDone)
-}
-
-// Run loads images and videos, opens the window, and blocks until the user quits.
+// Run loads images, opens the window, and blocks until the user quits.
 func (s *Slideshow) Run() error {
-	slides, rejected, err := s.scanSlides(nil, nil)
+	slides, err := s.scanSlides(nil)
 	if err != nil {
 		return err
 	}
@@ -532,7 +308,6 @@ func (s *Slideshow) Run() error {
 	}
 
 	s.slides = slides
-	s.rejected = rejected
 
 	a := app.New()
 	w := a.NewWindow("Mural Digital")
@@ -551,9 +326,8 @@ func (s *Slideshow) Run() error {
 	} else {
 		// Defer the initial show onto the event loop so it runs after the
 		// first layout pass: w.Canvas().Size() still reports the
-		// pre-layout placeholder size if called inline here, which an
-		// image slide self-corrects at its next decode but a video slide
-		// would bake into ffmpeg's scale filter for its entire playthrough.
+		// pre-layout placeholder size if called inline here, which the
+		// slide self-corrects at its next decode.
 		fyne.Do(func() {
 			s.show(0, true)
 		})
