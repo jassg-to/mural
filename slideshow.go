@@ -331,7 +331,7 @@ func (s *Slideshow) show(index int, instant bool) {
 	if instant {
 		// NearestNeighbor, not CatmullRom: this thumbnail is a fleeting
 		// placeholder, on screen only until the background decode below
-		// finishes, and measured ~13x faster on the target hardware — see
+		// finishes, and measured ~4.1x faster on the target hardware — see
 		// compositeLetterboxed's doc comment.
 		frame := compositeLetterboxed(sl.thumb, s.width, s.height, xdraw.NearestNeighbor)
 		if err := s.renderer.Present(frame); err != nil {

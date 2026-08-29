@@ -17,8 +17,9 @@ import (
 // profiling on real hardware (a Pi 3B+) found compositeLetterboxed's
 // CatmullRom pass dominating per-keypress latency when it's used to
 // upscale the small instant-nav thumbnail (~24x, 80px wide to a ~1920px
-// display) — xdraw.NearestNeighbor measured roughly 13x faster than
-// CatmullRom for that case, and quality doesn't matter for a placeholder
+// display) — a controlled benchmark (bench_test.go) measured
+// xdraw.NearestNeighbor roughly 4.1x faster than CatmullRom for that case
+// (113ms vs 466ms per call), and quality doesn't matter for a placeholder
 // on screen for a fraction of a second. The full decoded image that
 // replaces it and stays on screen for the whole interval keeps
 // xdraw.CatmullRom: decodeAndFit has already scaled it to fit, so this

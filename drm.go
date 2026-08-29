@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	xdraw "golang.org/x/image/draw"
@@ -34,7 +36,10 @@ type DRMRenderer struct {
 	height uint32
 
 	buffers [2]dumbBuffer
-	front   int // index of the buffer currently scanned out
+	// front is the index of the buffer currently scanned out. Touched by
+	// two goroutines — Present, on the run loop, and vt.go's WatchSwitches,
+	// on VT reacquire (SIGUSR2) — so it's atomic rather than a plain int.
+	front atomic.Int32
 }
 
 // ioctl issues a raw ioctl(2) syscall against fd.
@@ -116,7 +121,8 @@ func OpenDRMRenderer(devicePath string) (r *DRMRenderer, width, height int, err 
 		width:   w,
 		height:  h,
 		buffers: [2]dumbBuffer{buf0, buf1},
-		front:   0,
+		// front's zero value (0) is correct: SET_CRTC above was already
+		// pointed at buf0's fbID.
 	}
 	return r, int(w), int(h), nil
 }
@@ -264,7 +270,7 @@ func (r *DRMRenderer) Present(frame *image.RGBA) error {
 		src = compositeLetterboxed(nil, int(r.width), int(r.height), xdraw.CatmullRom)
 	}
 
-	back := 1 - r.front
+	back := 1 - r.front.Load()
 	buf := &r.buffers[back]
 	rgbaToXRGB8888(buf.data, int(buf.pitch), src)
 
@@ -276,11 +282,11 @@ func (r *DRMRenderer) Present(frame *image.RGBA) error {
 	if err := ioctl(r.fd, drmIoctlModePageFlip, unsafe.Pointer(&flip)); err != nil {
 		return fmt.Errorf("page flip: %w", err)
 	}
-	if err := waitForFlipEvent(r.fd); err != nil {
+	if err := waitForFlipEvent(r.fd, pageFlipTimeout); err != nil {
 		return fmt.Errorf("waiting for page flip completion: %w", err)
 	}
 
-	r.front = back
+	r.front.Store(back)
 	return nil
 }
 
@@ -295,12 +301,42 @@ func (r *DRMRenderer) Close() error {
 	return nil
 }
 
+// pageFlipTimeout bounds how long waitForFlipEvent will wait for a flip
+// completion event before giving up. Without a bound, an accepted-but-never-
+// completed flip — HDMI unplugged, or another process's DROP_MASTER racing
+// this one — would block the read forever on the single run-loop goroutine,
+// wedging it past any recovery: no nav keys, no ctx cancellation, not even
+// SIGTERM. A generous margin over one vsync interval (~16ms at 60Hz) still
+// bounds the sign to a few seconds of unresponsiveness in the worst case
+// rather than requiring SIGKILL.
+const pageFlipTimeout = 2 * time.Second
+
 // waitForFlipEvent blocks on fd until a DRM_EVENT_FLIP_COMPLETE event is
 // read back, per the drm_event/drm_event_vblank framing the kernel writes
-// in response to a page flip requested with DRM_MODE_PAGE_FLIP_EVENT.
-func waitForFlipEvent(fd int) error {
+// in response to a page flip requested with DRM_MODE_PAGE_FLIP_EVENT, or
+// until timeout elapses with no such event — treated as an ordinary error,
+// like any other page-flip failure (see Present's doc comment).
+func waitForFlipEvent(fd int, timeout time.Duration) error {
 	buf := make([]byte, 1024)
+	deadline := time.Now().Add(timeout)
 	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("timed out waiting for page flip completion")
+		}
+
+		pfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		nready, err := unix.Poll(pfds, int(remaining.Milliseconds()))
+		if err != nil {
+			if err == unix.EINTR {
+				continue
+			}
+			return fmt.Errorf("polling for DRM event: %w", err)
+		}
+		if nready == 0 {
+			return fmt.Errorf("timed out waiting for page flip completion")
+		}
+
 		n, err := unix.Read(fd, buf)
 		if err != nil {
 			return fmt.Errorf("reading DRM event: %w", err)

@@ -111,7 +111,7 @@ func (v *VT) WatchSwitches(ctx context.Context, r *DRMRenderer) (<-chan vtEvent,
 					if err := ioctl(r.fd, drmIoctlSetMaster, nil); err != nil {
 						log.Printf("VT acquire: SET_MASTER: %v", err)
 					}
-					if err := setCrtc(r.fd, r.crtcID, r.connID, r.buffers[r.front].fbID, r.mode); err != nil {
+					if err := setCrtc(r.fd, r.crtcID, r.connID, r.buffers[r.front.Load()].fbID, r.mode); err != nil {
 						log.Printf("VT acquire: SET_CRTC: %v", err)
 					}
 					if err := ioctlInt(int(v.f.Fd()), vtRelDisp, vtAckAcq); err != nil {

@@ -92,7 +92,7 @@ case "${response,,}" in
 [ "$(tty)" != "/dev/tty1" ] && exit 1
 
 cd ~/mural
-exec ./mural
+./mural
 
 cat <<'BANNER'
     ************************************************************
