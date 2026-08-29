@@ -4,5 +4,6 @@
   "current_step": 0,
   "total_steps": 33,
   "completed_steps": [],
-  "errors": []
+  "errors": [],
+  "notes": "Phase 1 + Phase 2 + Phase 3 (two-round critic) all complete. Round 1: 2 blocker + 3 warning. Round 2 (fresh-eyes): 1 blocker + 5 warning + 2 notes. All applied."
 }

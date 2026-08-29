@@ -178,10 +178,10 @@ like-for-like basis and adds no viewer-visible capability at all.
   **the kiosk session is autologin → Mural.** `install.sh` stops installing
   `xinit`, `ratpoison`, `libgl1`, `unclutter`, and
   `x11-xserver-utils`, and stops writing `.xinitrc` and `.ratpoisonrc`.
-  `docs/INSTALL.md` stops telling operators to type `startx`. *This collides
-  directly with `specs/nixos-deployment`, which is retiring `install.sh`
-  altogether. The two must not edit the same file in conflict, and the sequencing
-  is an open question.*
+  `docs/INSTALL.md` stops telling operators to type `startx`. *`specs/nixos-
+  deployment` is now PARKED at Phase 1 — its Phase 2 plan to retire `install.sh`
+  was deleted as stale along with the rest of that spec's Phase 2/3 artifacts.
+  There is no longer a competing edit to coordinate with.*
 
 - **Four of the six tests exercise player behaviour through a headless Fyne
   harness** →

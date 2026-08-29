@@ -293,10 +293,13 @@ the physical three-key device, whatever its final semantics turn out to be.
   DRM, a process that held master and died without restoring the mode can leave
   an operator facing a dead screen with no local way in.
 
-  This compounds badly with the access reality recorded in
-  `specs/nixos-deployment/spike-findings.md`: Tailscale on the board was logged
-  out, its LAN IP had drifted, and one automation user's SSH key had stopped
-  authenticating. **A dead screen on this board can mean a physical trip.**
+  This compounds badly with the access reality recorded during the NixOS
+  spike (`specs/nixos-deployment/Analyst.md`; the standalone spike-findings
+  note that originally captured this was later deleted as stale along with
+  the rest of that spec's Phase 2 artifacts — see `CLAUDE.md`'s NixOS
+  paragraph): Tailscale on the board was logged out, its LAN IP had drifted,
+  and one automation user's SSH key had stopped authenticating. **A dead
+  screen on this board can mean a physical trip.**
   Signal handling and mode restoration are therefore hard requirements, and their
   interaction with the guarded restart loop must be designed rather than assumed.
 
@@ -475,9 +478,14 @@ the physical three-key device, whatever its final semantics turn out to be.
   that VC4 V3D 2.1 exactly matches Fyne's GL 2.1 binding — stops being load-
   bearing.
 
-  **Neither specification gates the other. Whichever ships second must re-read
-  the first's assumptions before implementing.** In particular both intend to
-  change or retire `install.sh`, and they must not do it twice or in conflict.
+  **Updated since this was written: `specs/nixos-deployment` is now PARKED at
+  Phase 1.** Its hardware spike found on-device `nixos-rebuild` reliably
+  OOM-kills on the board's 1GB RAM, and its Phase 2/3 artifacts — including the
+  plan to retire `install.sh` — were deleted as stale rather than kept dormant.
+  There is no longer a second spec racing to edit `install.sh`; this feature
+  can modify it freely. If NixOS work resumes later on different hardware, it
+  restarts from that spec's Phase 1 and re-reads whatever this feature shipped,
+  not the other way around.
 
 - **`specs/usb-stick-hotplug` interlocks with the paths being rewritten.** That
   feature is unimplemented, so nothing breaks today, but it explicitly requires
@@ -581,7 +589,7 @@ proceed on optimism.*
 | Nav device unplugged and replugged while running | Navigation works again without restarting Mural |
 | An ordinary USB keyboard is plugged in | Its Left/Right/Home navigate, Delete sleeps the display, Escape quits, and any other key wakes the display if paused — binding is by keycode rather than by device, so the keyboard and the physical remote share the same Left/Right/Home behaviour. *An on-site engineer with a keyboard can stop the sign (Escape) or force it to sleep (Delete), but still cannot force a content reload — that gesture stays gone regardless of input device* |
 | Operator wants to force a content reload while standing at the sign | Not possible from the remote — `Home` no longer triggers a `Reload`. Content refreshes at scheduled turn-on, on the daily config reload, and (once built) on USB insertion. SSH is the answer otherwise. An accepted consequence of the pure-navigation decision, not an oversight |
-| Display unplugged and replugged (HDMI hotplug) | Behaviour must be defined rather than discovered. Realistic on a sign, and interacts with CEC power control, which already power-cycles the display deliberately |
+| Display unplugged and replugged (HDMI hotplug) | Resolved in Phase 2: a page-flip failure from the missing connector is an ordinary logged `Present` error, no crash or busy-loop; reconnection is picked up reactively on the next `Present` call, no dedicated detection. See Architect.md |
 | Display's preferred mode differs from 1920x1080 | Mode is discovered, not assumed |
 | Schedule turns the sign off | Display blacks and CEC standby is sent immediately — no animation to interrupt |
 | Schedule turns the sign on | Reload then CEC on, unchanged from today, with the first slide appearing without an initialisation flash |
@@ -601,10 +609,10 @@ decisions to make with the user in the loop. None should be silently defaulted.
 |----------|--------|
 | How is the board recovered if a DRM bug takes the display? | **OPEN — ELEVATED. Blocks the spike, and the spike is Phase 2's task 1.** Spare SD card with the known-good Debian/X install, serial console on the UART pins, or restored and verified remote access. One board, no confirmed spare card, Tailscale logged out, drifting LAN IP. *This was already the most operationally dangerous item; settling the three design questions promoted it to the front of the queue simply by clearing everything ahead of it. It is now the single thing standing between Phase 2 and its first task* |
 | What keycodes does the physical device emit? | **OPEN — empirical, not a decision.** The semantics are settled (Left/Right/Home); whether the device enumerates as a USB HID keyboard and actually sends `KEY_LEFT`/`KEY_RIGHT`/`KEY_HOME` must be read off the device. Spike item 4 |
-| Where does this sit relative to the NixOS work? | **OPEN — ELEVATED slightly, sequencing rather than design.** Both features are now at or near their implementation gate, both intend to change or retire `install.sh`, and both touch the kiosk session. *Previously this could wait; with both specs approaching Phase 2 it should be decided before either starts implementing, or the collision happens in exactly one file* |
+| Where does this sit relative to the NixOS work? | **RESOLVED — no longer a collision.** `specs/nixos-deployment` is now **PARKED at Phase 1**: its hardware spike found on-device `nixos-rebuild` reliably OOM-kills on the board's 1GB RAM, and its Phase 2/3 artifacts (the flake, module, `install.sh`-retirement plan) were deleted as stale rather than kept dormant (see `CLAUDE.md`'s NixOS paragraph). There is no competing intent to retire `install.sh` anymore — this feature is free to modify it without coordination |
 | Is the resource target a hard gate or a direction? | **OPEN.** If the result lands at 60MB rather than 40MB, is that a failed feature or a successful one? It matters, because it decides how much optimisation effort is justified once the thing works at all |
 | Is a change in scaler output quality acceptable? | **OPEN, minor.** Today both thumbnail and full-size paths use `nfnt/resize` with Lanczos3. Moving to `golang.org/x/image/draw` most naturally means `CatmullRom`, which is not pixel-identical. Almost certainly imperceptible on photographic signage content, but it is a visible-output change and should be acknowledged rather than slipped in |
-| What happens on HDMI hotplug? | **OPEN.** Realistic on a sign, and it interacts with CEC, which already deliberately power-cycles the display. Behaviour should be defined rather than discovered |
+| What happens on HDMI hotplug? | **RESOLVED in Phase 2 (`sdd-harden` Round 1).** A page-flip failure from a missing connector is an ordinary `Present` error — logged by the run loop, no panic, no busy-loop, no dedicated hotplug detection. Reconnection is picked up reactively on the next `Present` call (auto-advance or nav key), not via polling or a uevent listener. See Architect.md's DRM Backend section |
 | Should the release binaries keep shipping three Linux architectures? | **OPEN, low stakes.** Pure-Go static builds make this nearly free, so the answer is probably yes — but `specs/nixos-deployment` separately concluded those artifacts lose their documented consumer, and the two should not answer it differently |
 
 **Already settled — recorded so they are not re-opened:**

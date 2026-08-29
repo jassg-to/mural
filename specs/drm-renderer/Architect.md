@@ -62,6 +62,29 @@ fixed `1920x1080` — arbitrary and dev-only, documented as such at the call
 site rather than made configurable, since nothing in this feature needs it to
 be.
 
+**Both scaling call sites move off `nfnt/resize`, not just `decodeAndFit`.**
+`loadThumbnail` (currently `resize.Resize(width, 0, src, resize.Lanczos3)`,
+relying on nfnt's width-only auto-height convenience) is migrated alongside
+`decodeAndFit` — `golang.org/x/image/draw` has no equivalent "pass 0 for
+auto-height" call, so `loadThumbnail` computes its target height the same
+way `decodeAndFit` already does (scale factor from source aspect ratio,
+`math.Round`) before calling `draw.CatmullRom.Scale`. This is not optional:
+`github.com/nfnt/resize` is removed from `go.mod` in the dependency-cleanup
+step, so both call sites must be off it or the build fails.
+
+**HDMI hotplug is a defined, minimal behaviour, not an unhandled gap.**
+Analyst.md's edge-case table requires this be "defined rather than
+discovered." The definition: `DRMRenderer.Present`'s page-flip ioctl fails
+(`ENOENT`/`EIO`-class error) when no display is attached; `Present` returns
+that error exactly like any other page-flip failure — no special-cased
+detection, no panic, no busy-loop. The run loop logs the error and moves on;
+because `Present` is called again on the next slide change (auto-advance or
+nav key), a reconnected display is picked up reactively on that next call
+with no dedicated polling, uevent listener, or hotplug thread. This is the
+cheapest definition that satisfies "must be defined" without adding a new
+subsystem, and it composes for free with the existing per-slide `Present`
+call pattern.
+
 **Compositing is a pure, hardware-independent function**, split out precisely
 because Analyst.md calls it out as needing coverage without hardware:
 
@@ -95,6 +118,17 @@ exactly as-is: its job — discarding a stale decode result — is unchanged by
 the concurrency rewrite, and its result is delivered back into the run loop
 over the same command channel rather than via `fyne.Do`.
 
+**Shutdown is a `context.Context`, per `CLAUDE.md`'s own Go convention** ("Use
+`context.Context` for cancellation and timeouts in long-running or concurrent
+operations") — not a bespoke channel value invented for this feature. `Run()`
+creates one `ctx, cancel := context.WithCancel(context.Background())`; the
+run loop's `select` includes `case <-ctx.Done(): return`; `NavQuit` and
+`vt.go`'s `SIGTERM`/`SIGINT` handler both call `cancel()` rather than sending
+a sentinel down a dedicated quit channel. Background goroutines that outlive a
+single `select` iteration — `input.go`'s device watchers, the background image
+decode in `startImageDecode` — accept the same `ctx` and exit on
+`ctx.Done()` instead of leaking past `Run()` returning.
+
 **Key-event handling in the run loop preserves today's exact precedence**,
 per the user's decision to keep the full five-binding input arrangement
 rather than the three-key-only design this phase originally settled on:
@@ -125,6 +159,35 @@ buffer→page-flip sequence already proven working on `pi3b.local` by the
 `kmsmove.c` spike (300 flipped frames in 5.00s at 59.95fps, clean release
 after).
 
+**The guarded restart loop in `install.sh`'s `tty1-guard.sh` is retargeted, not
+dropped, and its crash-loop guard still applies.** Analyst.md requires that
+"[signal handling and mode restoration]'s interaction with the guarded restart
+loop must be designed rather than assumed." Today `tty1-guard.sh` execs
+`startx` and, when it returns (X exited — normally or via crash), prints a
+"waiting 30 seconds before restarting" banner and sleeps, before `.bashrc`
+re-invokes the guard on the next shell start. Under DRM, `tty1-guard.sh` execs
+the Mural binary directly instead of `startx`; the exact same
+return-then-30s-banner-then-retry shape is kept unchanged, so a Mural crash or
+panic still surfaces the "waiting 30 seconds" banner and still throttles
+restarts the same way an X crash does today — the guard script does not need
+to know or care whether the process that exited was `startx` or `mural`. This
+also means `vt.go`'s graceful `SIGTERM`/console-restore path (which runs on
+normal exit) leaves a working text console exactly where `tty1-guard.sh`'s
+banner is printed, so the banner itself is the confirmation that recovery
+worked.
+
+**Log output is unchanged: `log.Printf` to stderr, inherited by the console
+session, not a new sink.** This carries over unmodified from today's
+behaviour — X already ran with Mural's stderr connected to the same `tty1`
+console session, and DRM does not change that plumbing. The property Analyst.md
+actually requires ("a diagnosable error in its log, not a silent black
+screen") depends on the console being restored to a readable text mode after
+Mural exits, which is `vt.go`'s job on the graceful paths and the kernel's own
+teardown on `SIGKILL` (per the Phase 1 spike finding that `/dev/dri/card0`
+comes back unheld with no explicit cleanup code running). No log file,
+journald integration, or rotation is introduced — that would be new scope this
+feature doesn't need.
+
 **VT-switch and console-recovery handling is its own file** (`vt.go`) because
 it is orthogonal to rendering itself: it owns `SIGUSR1`/`SIGUSR2` (VT
 release/acquire, via `VT_SETMODE(VT_PROCESS)` on the controlling tty) and
@@ -154,6 +217,17 @@ means. Parsing a raw byte buffer into a `NavKey` is a pure
 function, tested without a real device; the enumeration/inotify/goroutine-
 per-device plumbing around it is not, and is exercised on-hardware in the
 final validation step.
+
+**Kernel autorepeat (`value == 2`) is treated identically to initial press
+(`value == 1`).** Analyst.md's edge case requires a held nav key to keep
+advancing without lag — "each repeat advances one slide immediately." Linux
+evdev synthesizes `value == 2` repeat events for a held key at the kernel's
+configured repeat rate; `parseInputEvent` must map both `value == 1` and
+`value == 2` key-down states to the same `NavKey`, and only `value == 0`
+(key-up) and non-`EV_KEY` events fall through to `ok == false`. Treating
+`value == 2` as a no-op — the more obvious reading of "key-up and non-key
+events return `ok == false`" — would silently drop autorepeat and make a
+held key advance once and then stall until released and re-pressed.
 
 ## Package Contracts
 
@@ -200,7 +274,7 @@ changes shape.
 
 | File | Change |
 |---|---|
-| `slideshow.go` | Drop all Fyne imports/usage; adopt `Renderer`, single-goroutine run loop with today's exact key precedence (`NavQuit`/`NavSleep` act unconditionally and don't resume; `NavLeft`/`NavRight`/`NavHome`/`NavWake` resume a paused sign first), int-sized `decodeAndFit` via `golang.org/x/image/draw`, corrupt-image black-frame behaviour via `compositeLetterboxed(nil, ...)` |
+| `slideshow.go` | Drop all Fyne imports/usage; adopt `Renderer`, single-goroutine run loop with today's exact key precedence (`NavQuit`/`NavSleep` act unconditionally and don't resume; `NavLeft`/`NavRight`/`NavHome`/`NavWake` resume a paused sign first), int-sized `decodeAndFit` **and `loadThumbnail`** via `golang.org/x/image/draw`, corrupt-image black-frame behaviour via `compositeLetterboxed(nil, ...)` |
 | `main.go` | Add `-headless` flag; construct `DRMRenderer` (default, fails loudly) or `HeadlessRenderer` (on flag); wire `input.go` and, for `DRMRenderer` only, `vt.go`; handle `NavQuit` as a clean shutdown (renderer `Close()`, VT/console restore, process exit); remove all `fyne/app`/window setup |
 | `slideshow_test.go` | Replace `newHeadlessSlideshow`'s Fyne `test.NewApp()`/`canvas.Image` with a `fakeRenderer` implementing `Renderer`; adapt the four Fyne-coupled tests to assert against it; add tests for `compositeLetterboxed`, `pickPreferredMode`, `rgbaToXRGB8888`, `input.go`'s raw-event parser, and the `NavQuit`/`NavSleep` bypass-resume precedence |
 | `go.mod` / `go.sum` | Remove `fyne.io/*` and its indirect closure and `github.com/nfnt/resize`; promote `golang.org/x/image` and `golang.org/x/sys` to direct requires; `go mod tidy` |
@@ -250,6 +324,7 @@ changes shape.
 - **Spike items 3 (input identity) and 4 (footprint) have not run yet.** Only item 1 (DRM bring-up) and part of item 2 (console recovery on normal exit / kill) have empirical results so far. `input.go`'s design assumes standard `KEY_LEFT`/`KEY_RIGHT`/`KEY_HOME` codes from the real three-key device; this is unconfirmed.
 - **The explicit `-headless` flag (vs. auto-detection) is a judgement call Critic should re-examine.** It is chosen specifically to satisfy the loud-failure edge cases in Analyst.md, but it does mean a developer must remember to pass the flag — an easy thing to forget and then be confused by a loud DRM failure on a laptop. Mitigation considered and rejected: detecting "known dev machine" some other way is more complexity for less clarity than one documented flag.
 - **`x/image/draw`'s `CatmullRom` vs. `nfnt/resize`'s `Lanczos3`** is a visible, if likely imperceptible, output change — carried over from Analyst.md/Delta.md, not newly introduced here.
+- **`Reload` keeps its existing fused "rescan + resume" shape; it is not split here.** `specs/usb-stick-hotplug/Delta.md` requires eventually splitting "rescan content" from "un-pause and power on the display," because a failed or rejected USB volume must not wake the display. This feature does not implement that split — `Reload` is ported into the command-channel design with its current body unchanged, per Analyst.md's own framing that neither spec gates the other and "whichever ships second must re-read the first's assumptions." That's forward-compatible, not a dead end: `Reload` becomes one command posted into the run loop's channel, and splitting it into two separate commands later (rescan-only, resume-only) is no harder against this design than against today's single `fyne.Do(func(){...})` call — `usb-stick-hotplug`'s Phase 2 will do that split against whatever shape `slideshow.go` has at that time.
 - **The single-goroutine run loop removes the need for `fyne.Do`, but is itself unverified under real concurrent load** (nav key arriving in the same instant as an advance-timer fire, a VT-switch signal arriving mid-decode) until exercised on hardware.
 
 ## Architect Checklist
