@@ -2,26 +2,140 @@ name: Build
 
 on:
   push:
-  pull_request:
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      amd64:
+        description: Build linux/amd64
+        type: boolean
+        default: false
+      arm64:
+        description: Build linux/arm64
+        type: boolean
+        default: true
+      arm:
+        description: Build linux/arm (v7)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            # Tag push — build all targets
+            echo 'matrix={"include":[{"suffix":"amd64","goarch":"amd64"},{"suffix":"arm64","goarch":"arm64","dpkg_arch":"arm64","cross_cc":"aarch64-linux-gnu-gcc","cross_pkg":"gcc-aarch64-linux-gnu","pkg_config_path":"/usr/lib/aarch64-linux-gnu/pkgconfig"},{"suffix":"arm","goarch":"arm","goarm":"7","dpkg_arch":"armhf","cross_cc":"arm-linux-gnueabihf-gcc","cross_pkg":"gcc-arm-linux-gnueabihf","pkg_config_path":"/usr/lib/arm-linux-gnueabihf/pkgconfig"}]}' >> "$GITHUB_OUTPUT"
+          else
+            # Manual dispatch — build selected targets
+            include='[]'
+            if [[ "${{ inputs.amd64 }}" == "true" ]]; then
+              include=$(echo "$include" | jq -c '. + [{"suffix":"amd64","goarch":"amd64"}]')
+            fi
+            if [[ "${{ inputs.arm64 }}" == "true" ]]; then
+              include=$(echo "$include" | jq -c '. + [{"suffix":"arm64","goarch":"arm64","dpkg_arch":"arm64","cross_cc":"aarch64-linux-gnu-gcc","cross_pkg":"gcc-aarch64-linux-gnu","pkg_config_path":"/usr/lib/aarch64-linux-gnu/pkgconfig"}]')
+            fi
+            if [[ "${{ inputs.arm }}" == "true" ]]; then
+              include=$(echo "$include" | jq -c '. + [{"suffix":"arm","goarch":"arm","goarm":"7","dpkg_arch":"armhf","cross_cc":"arm-linux-gnueabihf-gcc","cross_pkg":"gcc-arm-linux-gnueabihf","pkg_config_path":"/usr/lib/arm-linux-gnueabihf/pkgconfig"}]')
+            fi
+            echo "matrix={\"include\":$include}" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: prepare
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            system: x86_64-linux
-          - runner: ubuntu-24.04-arm
-            system: aarch64-linux
-    runs-on: ${{ matrix.runner }}
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/setup-go@v6
         with:
-          nix_path: nixpkgs=channel:nixos-26.05
+          go-version-file: go.mod
+          cache: true
 
-      - name: nix build .#mural
-        run: nix build .#packages.${{ matrix.system }}.mural -L
+      - name: Install native GL/X11 headers
+        run: |
+          sudo apt-get install -y \
+            pkg-config \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxxf86vm-dev
+
+      - name: Set up cross-compilation (${{ matrix.dpkg_arch }})
+        if: matrix.dpkg_arch
+        run: |
+          sudo dpkg --add-architecture ${{ matrix.dpkg_arch }}
+
+          # Pin existing DEB822 sources (ubuntu.sources) to amd64 only
+          for f in /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$f" ] && ! grep -q '^Architectures:' "$f"; then
+              sudo sed -i '/^Types:/a Architectures: amd64' "$f"
+            fi
+          done
+
+          # Also handle legacy sources.list if present
+          sudo sed -i \
+            's|^deb http://archive.ubuntu.com/ubuntu |deb [arch=amd64] http://archive.ubuntu.com/ubuntu |' \
+            /etc/apt/sources.list 2>/dev/null || true
+          sudo sed -i \
+            's|^deb http://security.ubuntu.com/ubuntu |deb [arch=amd64] http://security.ubuntu.com/ubuntu |' \
+            /etc/apt/sources.list 2>/dev/null || true
+
+          # Add ports.ubuntu.com for the target arch
+          printf '%s\n' \
+            "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe" \
+            "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe" \
+            "deb [arch=${{ matrix.dpkg_arch }}] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe" \
+            | sudo tee /etc/apt/sources.list.d/cross-${{ matrix.dpkg_arch }}.list
+          sudo apt-get update
+          sudo apt-get install -y \
+            ${{ matrix.cross_pkg }} \
+            libgl1-mesa-dev:${{ matrix.dpkg_arch }} \
+            libx11-dev:${{ matrix.dpkg_arch }} \
+            libxrandr-dev:${{ matrix.dpkg_arch }} \
+            libxinerama-dev:${{ matrix.dpkg_arch }} \
+            libxcursor-dev:${{ matrix.dpkg_arch }} \
+            libxi-dev:${{ matrix.dpkg_arch }} \
+            libxxf86vm-dev:${{ matrix.dpkg_arch }}
+
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm || '' }}
+          CC: ${{ matrix.cross_cc || 'gcc' }}
+          PKG_CONFIG_PATH: ${{ matrix.pkg_config_path || '' }}
+        run: go build -trimpath -ldflags="-s -w" -o mural_linux_${{ matrix.suffix }} .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mural_linux_${{ matrix.suffix }}
+          path: mural_linux_${{ matrix.suffix }}
+
+  release:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: mural_linux_*

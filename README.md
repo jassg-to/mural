@@ -85,7 +85,7 @@ last = [ "18:00-22:00" ]  # extra hours on the last Saturday of the month
 - All UI updates from background goroutines go through `fyne.Do()`.
 - The scheduler sleeps until the next event each day; CEC commands run via `cec-client -s`.
 
-> Video playback is intentionally out of scope for this Go codebase. A future "Kodi launcher mode" is the planned path for video — mural handing off to an externally-managed Kodi process rather than decoding video itself — not yet implemented. See `specs/nixos-deployment/spike-findings.md` for the hardware findings that motivated this.
+> Video playback is intentionally out of scope for this Go codebase. A future "Kodi launcher mode" is the planned path for video — mural handing off to an externally-managed Kodi process rather than decoding video itself — not yet implemented.
 
 ## Development
 

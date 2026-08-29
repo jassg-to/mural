@@ -2,6 +2,21 @@
 
 > Phase 1 — Problem definition. Approved before architecture begins.
 
+> **PARKED.** The hardware spike this document gates on (see *Current status*
+> below) came back negative: on-device `nixos-rebuild` reliably OOM-kills
+> during *evaluation* — package resolution, before a single package is even
+> built — on the deployed Pi 3B+'s 1GB RAM. That board is not viable for this
+> feature, full stop, not merely slow. The flake, module, and Phase 2/3 work
+> that followed this document (`Architect.md`, `tasks.md`, `status.json`,
+> `flake.nix`, `nix/`) have been deleted rather than kept dormant, so they
+> don't accumulate drift against decisions that will need revisiting anyway.
+> This document is retained as the Phase 1 problem definition, parked at
+> planning stage, to be picked back up only if the deployed hardware changes
+> to something with meaningfully more RAM. Everything below reflects the
+> reasoning as of that point — including the parts about the spike still
+> being open — and should be re-validated, not assumed, before any future
+> Phase 2 restart.
+
 ## Goal / Outcome
 
 **Scope classification:** Complex
@@ -445,7 +460,7 @@ here means the install and deployment mechanism, not the player process.
 | Does this require CI changes? | **Reopened by the replacement decision — the earlier "no" no longer holds.** With the Debian path retired, the Linux release artifacts lose their last documented consumer. This resolves cleanly rather than painfully: those binaries could never have run on NixOS anyway, so retiring or repurposing them discards something already inapplicable rather than a working capability. What to actually do with the Linux half of the workflow — delete, keep as explicitly unsupported, or repoint — is Phase 2's call, and the Windows target is unaffected and may independently justify keeping it. Writing the change remains out of scope for Phase 1 |
 | What happens to signs already deployed on Raspberry Pi OS? | **They keep running, become unsupported, and the gap is documented rather than automated.** Nothing reaches out and breaks them, but no installer, update route, or documentation will still describe them; a sign that dies is re-provisioned onto NixOS. Building migration tooling is an explicit non-goal — disclosing the consequence in the rewritten documentation is an explicit requirement. This is the acknowledged cost of replacement, accepted by the user with the alternatives in view |
 | Which hardware is the actual target — Raspberry Pi, or x86-64? | **Answered: a Raspberry Pi, an older Pi-3-class 64-bit board.** Confirmed by consultation during this phase. The risk therefore does *not* evaporate — it is the live one. It also means x86-64 verification cannot stand in for real verification, and that the board is modest enough for on-device builds to need proving |
-| Will NixOS actually run acceptably on that board? | **Open, unverified, and the feature's gating risk.** Nobody consulted had NixOS-on-Pi experience to offer. Requires a hardware spike — boot and firmware, `aarch64` image generation, display bring-up, and whether builds happen on-device or elsewhere — **before** any commitment to Phase 2. If this fails, the feature ends here, and it is far cheaper to learn that now |
+| Will NixOS actually run acceptably on that board? | **No — answered, and negatively.** The hardware spike found on-device `nixos-rebuild` reliably OOM-kills during evaluation (package resolution, before anything builds) on the board's 1GB RAM. Not a performance concession; the board cannot get through evaluation at all. Building elsewhere was evaluated as the workaround and rejected as not worth the friction for a single sign. This is the feature's gating risk having actually gated it — see the PARKED notice at the top of this document and *Current status* below |
 | How much Nix has to be written from scratch? | **All of it — more than the framing suggested.** There is no in-house precedent for either half: no local package definitions of any kind, and no kiosk/autologin configuration anywhere to adapt. Both the packaging and the kiosk session are net-new against standard idioms. Not a blocker, but the feature must be sized as building two unfamiliar things rather than as retargeting an installer |
 | Which `ffmpeg` variant? | **Open.** `nixpkgs` offers several with differing codec coverage; Mural needs the `ffmpeg` and `ffprobe` executables plus H.264 decode. A non-question on Debian, a deliberate choice here, and one to verify against real content rather than infer from the package name |
 | Is CEC a risk to this feature? | **No — explicitly settled by the user.** CEC is best-effort: wanted where it works, not a blocker, and already designed to no-op gracefully. It gets a verification item and nothing more, and must not be allowed to gate the NixOS path |
@@ -470,33 +485,46 @@ here means the install and deployment mechanism, not the player process.
 - [x] Edge cases are identified and handled
 - [x] Non-goals prevent scope creep
 
-**Gate status: ready for Phase 2, with one carried dependency.**
+**Gate status: PARKED. The hardware spike failed outright and there is no
+fallback path, so Phase 2 does not proceed on the current hardware.**
 
-The additional-vs-replacement decision — previously the blocking condition — has
-been answered by the user as **full replacement**, and this document and
-`Delta.md` are written to it with no remaining hedges.
+The additional-vs-replacement decision — previously the blocking condition — was
+answered by the user as **full replacement**, and this document was written to
+that decision with no remaining hedges. That decision is not what stalled the
+feature.
 
-**The hardware spike carries forward as Phase 2's task 1, blocking all others.**
-It is deliberately *not* resolved here, because it is a question about physical
-hardware rather than about the specification. Its full definition, exit
-criteria, and escalation path are in *Rules & Constraints* → "NixOS on the
-actual target hardware is unverified"; the architect should lift that directly
-into `tasks.md` as the first task and make the rest contingent on it. Items 1–3
-of that spike (boot, display, build feasibility) are pass/fail and return the
-replacement decision to the user if they fail, since replacement leaves no
-fallback path to retreat to.
+**The hardware spike (task 1, blocking all others per the original plan)
+returned a hard fail on item 3, build feasibility, before items 1–2 could
+even be meaningfully exercised.** On-device `nixos-rebuild` reliably OOM-kills
+during *evaluation* — package resolution, before any package is built — on
+the deployed board's 1GB RAM. This is not a slow-but-workable result and not
+a "narrow the supported-hardware claim" judgement call under item 5; it is
+the pass/fail exit criterion for item 3 in *Rules & Constraints* →
+"NixOS on the actual target hardware is unverified" returning **fail**, on a
+board that cannot even resolve the package set, let alone build the CGo/Fyne/
+GL/X11 closure. Building the closure elsewhere (cross-compilation or a remote
+builder) was evaluated as the alternative and added enough friction and
+turnaround time that it wasn't worth it for a single sign either.
 
-**Current status: the single physical deployment is temporarily deactivated
-for physical-constraint reasons** (unspecified further here). It is not
-believed to be gone permanently, and this does not by itself block the
-feature — but it does interact with the still-open boot criterion above: per
-`spike-findings.md`, that criterion already required a spare SD card to safely
-close out (to avoid touching the production sign's own card), and the board
-being deactivated is a further reason that exercise may not happen soon. Treat
-the boot-criterion gate as pending for longer than previously assumed, not as
-newly at risk or invalidated.
+Per the exit criteria already defined in this document: **"any failure returns
+the replacement decision to the user rather than being designed around, since
+there is no fallback path to retreat to."** That is what has happened. The
+Debian/`install.sh` deployment path is retained as the sole supported target
+for the currently deployed hardware, and the NixOS architecture, tasks, and
+implementation groundwork that had started against this document have been
+deleted rather than kept dormant — see the PARKED notice at the top of this
+document.
 
-Nothing else needs resolving before Phase 2 begins. In particular, CEC is
-explicitly *not* a gating condition: it is best-effort, already degrades
-gracefully by design, and a NixOS sign whose CEC does not work is still a
-working sign.
+**Current status: parked at Phase 1, pending a hardware change.** This
+document is retained specifically so that if the deployed sign is ever moved
+to hardware with meaningfully more RAM than a Pi 3B+, the problem definition,
+scope decisions, and constraints already reasoned through here don't have to
+be rediscovered — only re-validated. The boot and display criteria (items 1–2
+of the spike) were never resolved either way and should not be assumed to
+pass; the build-feasibility failure alone is sufficient to park the feature,
+independent of those.
+
+In particular, CEC remains *not* a gating condition for any future attempt:
+it is best-effort, already degrades gracefully by design, and a NixOS sign
+whose CEC does not work is still a working sign. That reasoning is unaffected
+by the reason this is parked.
