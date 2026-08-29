@@ -1,6 +1,6 @@
 # Mural
 
-A digital signage player built with [Fyne](https://fyne.io/). Cycles through images in a content directory, with a daily schedule for display on/off times and HDMI CEC control. Optimized for Raspberry Pi.
+A digital signage player that renders directly to Linux DRM/KMS — no GUI toolkit, no X11, no Wayland. Cycles through images in a content directory, with a daily schedule for display on/off times and HDMI CEC control. Optimized for Raspberry Pi.
 
 ## Quick Install (Raspberry Pi)
 
@@ -13,8 +13,8 @@ This downloads the latest pre-built binary, installs dependencies, and sets up t
 ## Prerequisites
 
 - Go 1.25+ (only needed if building from source)
-- GCC (for CGo/Fyne) — on Windows, install via [MSYS2](https://www.msys2.org/) or [TDM-GCC](https://jmeubank.github.io/tdm-gcc/)
 - `cec-client` on the PATH for HDMI CEC control (optional; no-op if absent)
+- Linux — Mural talks to DRM/KMS and evdev directly, which have no Windows equivalent
 
 ## Usage
 
@@ -38,13 +38,11 @@ The optional argument specifies the content directory (default: `content`).
 |-----|--------|
 | Right arrow | Next slide |
 | Left arrow | Previous slide |
-| Home | Rescan content directory and show first slide |
-| Delete | Pause (black screen) |
+| Home | Jump to the first slide |
+| Delete | Sleep the display (black screen, CEC standby) |
 | Esc | Quit |
 
-When the display is paused (scheduled off-time or Delete key), any nav key wakes it immediately.
-
-The window defaults to 800x450 and is resizable. Ratpoison will automatically fit it to screen.
+Binding is by keycode, not by device, so a USB keyboard and the physical three-key remote (Left/Right/Home) behave the same way. When the display is paused (scheduled off-time or Delete), any other recognized key wakes it immediately.
 
 ## Configuration
 
@@ -80,9 +78,10 @@ last = [ "18:00-22:00" ]  # extra hours on the last Saturday of the month
 ## How It Works
 
 - Images are loaded from the content directory in filename order. Only changed files are re-decoded on reload.
-- Tiny thumbnails (default 80px, configurable via `thumb_width` in config) are pre-loaded for instant keyboard navigation; full images are decoded on demand and scaled to the window.
+- Tiny thumbnails (default 80px, configurable via `thumb_width` in config) are pre-loaded for instant navigation; full images are decoded on demand and scaled to fit the display's native resolution, then letterboxed onto a black frame.
 - A generation counter prevents stale background loads from overwriting a newer slide.
-- All UI updates from background goroutines go through `fyne.Do()`.
+- Mural runs a single-goroutine event loop: key events, the advance timer, background decode results, and pause/reload requests are all handled serially, with no locks.
+- Display output is direct DRM/KMS — double-buffered dumb buffers, page-flip — via a hand-written ioctl layer, since no mature Go DRM library exists. Input is read directly from the kernel via evdev.
 - The scheduler sleeps until the next event each day; CEC commands run via `cec-client -s`.
 
 > Video playback is intentionally out of scope for this Go codebase. A future "Kodi launcher mode" is the planned path for video — mural handing off to an externally-managed Kodi process rather than decoding video itself — not yet implemented.
@@ -90,7 +89,7 @@ last = [ "18:00-22:00" ]  # extra hours on the last Saturday of the month
 ## Development
 
 ```bash
-go run .
+go run . -headless
 ```
 
-> **Note:** The first build takes a long time (10-20 min on Windows) due to Fyne's CGo compilation. Subsequent builds are fast thanks to the build cache.
+> Mural needs a free VT and DRM/evdev device permissions, so it can't run inside a desktop session. `-headless` swaps in a renderer that PNG-dumps each composited frame to disk instead of driving real display hardware, so you can develop and test without a Pi and a monitor in front of you.

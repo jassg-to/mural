@@ -38,9 +38,9 @@ curl -fsSL https://raw.githubusercontent.com/jassg-to/mural/main/install.sh | ba
 ```
 
 The installer will:
-- Install required packages (`xinit`, `ratpoison`, `cec-utils`)
+- Install required packages (`cec-utils`)
+- Add your user to the `video` and `input` groups, so Mural can talk to the display and the remote directly, without root
 - Download the `mural` binary
-- Set up your window manager config
 - Create `~/mural/content/` with a sample schedule
 - Offer to configure **automatic startup** (autologin + auto-launch on boot)
 - Offer to set up **Samba file sharing** so you can add images from any computer on your network
@@ -57,9 +57,17 @@ Optionally edit `~/mural/content/config.toml` to set slideshow settings and the 
 
 ## Run
 
-Type `startx` and press Enter. The slideshow will launch.
+Log out and back in (or reboot) once, so your new `video`/`input` group membership takes effect. Then run:
 
-Press any arrow key to manually advance slides. The display will turn off and on automatically according to your schedule.
+```
+~/mural/mural ~/mural/content
+```
+
+The slideshow will launch directly on the console — no window manager, no `startx`.
+
+Left/Right navigate to the previous/next slide, Home jumps to the first slide, Delete puts the display to sleep, and Escape quits. Any other key wakes the display if it's asleep. The display will also turn off and on automatically according to your schedule.
+
+> **Developing off the Pi?** Mural also runs on a regular Linux machine with the `-headless` flag, which writes each composited frame to a PNG file on disk instead of driving real display hardware — useful for iterating without a Pi and a monitor in front of you: `./mural -headless ~/mural/content`.
 
 
 ## Automatic Startup

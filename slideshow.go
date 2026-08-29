@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
-	"image/color"
 	_ "image/jpeg"
 	_ "image/png"
 	"log"
@@ -14,11 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
-	"github.com/nfnt/resize"
+	xdraw "golang.org/x/image/draw"
 )
 
 var imageExts = map[string]bool{
@@ -42,17 +38,37 @@ type Slide struct {
 	mtime time.Time
 }
 
+// loadThumbnail decodes path and scales it to width, preserving aspect
+// ratio. x/image/draw has no width-only auto-height convenience (unlike
+// nfnt/resize's Resize(width, 0, ...)), so the target height is computed
+// manually — the same scale-factor math decodeAndFit uses.
 func loadThumbnail(path string, width uint) image.Image {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
+	defer f.Close()
+
 	src, _, err := image.Decode(f)
-	f.Close()
 	if err != nil {
 		return nil
 	}
-	return resize.Resize(width, 0, src, resize.Lanczos3)
+
+	bounds := src.Bounds()
+	imgW := float64(bounds.Dx())
+	imgH := float64(bounds.Dy())
+	if imgW <= 0 || imgH <= 0 {
+		return nil
+	}
+	scale := float64(width) / imgW
+	targetH := int(math.Round(imgH * scale))
+	if targetH < 1 {
+		targetH = 1
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, int(width), targetH))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, xdraw.Src, nil)
+	return dst
 }
 
 // scanSlides scans dir for images and returns a []Slide. existing slides
@@ -60,8 +76,8 @@ func loadThumbnail(path string, width uint) image.Image {
 // re-decoding a thumbnail.
 //
 // existing is a snapshot passed in by the caller and never mutated in
-// place: scanSlides runs from Run() on the Fyne main goroutine and from
-// Reload() on a background goroutine, so a shared mutable map would be a
+// place: scanSlides runs from Run() on the run-loop goroutine and from a
+// reload's background goroutine, so a shared mutable map would be a
 // concurrent map write — an unrecoverable Go runtime fatal, not a benign
 // race.
 func (s *Slideshow) scanSlides(existing []Slide) ([]Slide, error) {
@@ -109,7 +125,12 @@ func (s *Slideshow) scanSlides(existing []Slide) ([]Slide, error) {
 	return slides, nil
 }
 
-func decodeAndFit(path string, width, height float32) (image.Image, error) {
+// decodeAndFit decodes path and scales it to fit within width×height,
+// preserving aspect ratio. The result is not itself letterboxed onto a
+// width×height canvas — compositeLetterboxed does that uniformly for every
+// frame (this path, the thumbnail-instant path, and the nil/corrupt path)
+// at Present time.
+func decodeAndFit(path string, width, height int) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening image: %w", err)
@@ -125,54 +146,110 @@ func decodeAndFit(path string, width, height float32) (image.Image, error) {
 	imgW := float64(bounds.Dx())
 	imgH := float64(bounds.Dy())
 	scale := math.Min(float64(width)/imgW, float64(height)/imgH)
-	targetW := uint(math.Round(imgW * scale))
-	targetH := uint(math.Round(imgH * scale))
+	targetW := int(math.Round(imgW * scale))
+	targetH := int(math.Round(imgH * scale))
+	if targetW < 1 {
+		targetW = 1
+	}
+	if targetH < 1 {
+		targetH = 1
+	}
 
-	return resize.Resize(targetW, targetH, src, resize.Lanczos3), nil
+	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, xdraw.Src, nil)
+	return dst, nil
 }
 
+// Run-loop internal messages. Every mutation that used to be marshalled
+// through fyne.Do — Pause/Reload from any goroutine, a completed
+// background decode, the advance timer firing — is now a value posted into
+// Slideshow.cmdCh and handled inside the single run-loop goroutine in Run.
+type pauseMsg struct{}
+type reloadRequestMsg struct{}
+type reloadResultMsg struct {
+	slides []Slide
+	err    error
+}
+type decodeResultMsg struct {
+	gen int64
+	img image.Image
+}
+type advanceMsg struct{}
+
 // Slideshow loads images from dir and displays them as a fullscreen
-// slideshow.
+// slideshow via a Renderer.
 type Slideshow struct {
 	dir        string
 	interval   time.Duration
 	thumbWidth uint
+	width      int
+	height     int
 
-	// fields below are set during Run and accessed only on the Fyne main goroutine,
-	// except via Pause/Reload which marshal through fyne.Do.
+	// fields below are set during Run and accessed only on the run-loop
+	// goroutine, except via Pause/Reload which post into cmdCh instead of
+	// mutating directly.
 	slides       []Slide
 	current      int
 	paused       bool
 	generation   atomic.Int64
-	img          *canvas.Image
+	renderer     Renderer
 	advanceTimer *time.Timer
-	winSize      func() fyne.Size
+
+	cmdCh  chan any
+	navCh  <-chan NavKey
+	vtCh   <-chan vtEvent
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	cec         *CEC
 	startPaused bool
 }
 
-func NewSlideshow(dir string, interval time.Duration, thumbWidth uint, cec *CEC) *Slideshow {
-	return &Slideshow{dir: dir, interval: interval, thumbWidth: thumbWidth, cec: cec}
+// NewSlideshow constructs a Slideshow. ctx is stored immediately (not
+// deferred to Run) so Pause/Reload are safe to call from any goroutine —
+// including schedule.go's callback goroutine — even before Run begins.
+// width and height are the renderer's discovered display size, known once
+// at startup and never re-queried.
+func NewSlideshow(ctx context.Context, dir string, interval time.Duration, thumbWidth uint, cec *CEC, renderer Renderer, width, height int) *Slideshow {
+	return &Slideshow{
+		dir:        dir,
+		interval:   interval,
+		thumbWidth: thumbWidth,
+		width:      width,
+		height:     height,
+		renderer:   renderer,
+		cec:        cec,
+		cmdCh:      make(chan any),
+		ctx:        ctx,
+	}
+}
+
+// postCommand sends msg into cmdCh for the run loop to process, or gives up
+// if ctx is already done (e.g. the process is shutting down and nothing
+// will ever read cmdCh again).
+func (s *Slideshow) postCommand(msg any) {
+	select {
+	case s.cmdCh <- msg:
+	case <-s.ctx.Done():
+	}
 }
 
 // Pause stops the slideshow, blacks out the display, and turns off the
 // connected display via CEC. Safe to call from any goroutine.
 func (s *Slideshow) Pause() {
-	fyne.Do(s.pause)
+	s.postCommand(pauseMsg{})
 }
 
 // pause blacks out the display, stops the advance timer, and sends CEC
-// standby. Must be called from the Fyne main goroutine.
+// standby. Must be called from the run-loop goroutine.
 func (s *Slideshow) pause() {
 	s.paused = true
-	s.generation.Add(1) // cancel any in-flight background load
+	s.generation.Add(1) // cancel any in-flight background decode
 	if s.advanceTimer != nil {
 		s.advanceTimer.Stop()
 	}
-	if s.img != nil {
-		s.img.Image = nil
-		s.img.Refresh()
+	if err := s.renderer.Present(nil); err != nil {
+		log.Printf("presenting blank frame: %v", err)
 	}
 	go func() {
 		if err := s.cec.TurnOff(); err != nil {
@@ -182,12 +259,10 @@ func (s *Slideshow) pause() {
 }
 
 // resume un-pauses, redisplays the current slide, and sends CEC power-on.
-// Must be called from the Fyne main goroutine.
+// Must be called from the run-loop goroutine.
 func (s *Slideshow) resume() {
 	s.paused = false
-	if s.img != nil {
-		s.show(s.current, true)
-	}
+	s.show(s.current, true)
 	go func() {
 		if err := s.cec.TurnOn(); err != nil {
 			log.Printf("CEC TurnOn: %v", err)
@@ -195,53 +270,45 @@ func (s *Slideshow) resume() {
 	}()
 }
 
-// Reload rescans the content directory, resets to slide 0, and un-pauses.
-// Safe to call from any goroutine.
+// Reload requests a rescan of the content directory, a reset to slide 0,
+// and an un-pause. Safe to call from any goroutine.
 func (s *Slideshow) Reload() {
-	// Snapshot current slides on the main goroutine so scanSlides can reuse
-	// unchanged entries without a lock.
-	var existing []Slide
-	fyne.Do(func() {
-		existing = make([]Slide, len(s.slides))
-		copy(existing, s.slides)
-	})
+	s.postCommand(reloadRequestMsg{})
+}
 
-	slides, err := s.scanSlides(existing)
-	if err != nil {
-		log.Printf("slideshow reload: %v", err)
-		return
-	}
-	if len(slides) == 0 {
-		log.Printf("slideshow reload: no images found in %s", s.dir)
-		return
-	}
-	fyne.Do(func() {
-		s.slides = slides
-		s.current = 0
-		s.resume()
-	})
+// startReload snapshots the current slides and rescans the content
+// directory on a background goroutine, posting the result back into cmdCh.
+// Must be called from the run-loop goroutine (it reads s.slides directly).
+func (s *Slideshow) startReload() {
+	existing := make([]Slide, len(s.slides))
+	copy(existing, s.slides)
+
+	go func() {
+		slides, err := s.scanSlides(existing)
+		select {
+		case s.cmdCh <- reloadResultMsg{slides: slides, err: err}:
+		case <-s.ctx.Done():
+		}
+	}()
 }
 
 // scheduleAdvance stops any pending advance timer and arms a new one that
-// advances to the next slide after d elapses. Must be called from the Fyne
-// main goroutine; advanceTimer is only ever touched there, so it needs no
-// lock.
+// posts an advanceMsg after d elapses. Must be called from the run-loop
+// goroutine; advanceTimer is only ever touched there, so it needs no lock.
 func (s *Slideshow) scheduleAdvance(d time.Duration) {
 	if s.advanceTimer != nil {
 		s.advanceTimer.Stop()
 	}
 	s.advanceTimer = time.AfterFunc(d, func() {
-		fyne.Do(func() {
-			if s.paused {
-				return
-			}
-			s.advanceToNext()
-		})
+		select {
+		case s.cmdCh <- advanceMsg{}:
+		case <-s.ctx.Done():
+		}
 	})
 }
 
 // advanceToNext shows the next slide (auto-advance, no thumbnail flash).
-// Must be called from the Fyne main goroutine.
+// Must be called from the run-loop goroutine.
 func (s *Slideshow) advanceToNext() {
 	n := len(s.slides)
 	idx := (s.current + 1) % n
@@ -249,56 +316,136 @@ func (s *Slideshow) advanceToNext() {
 }
 
 // show displays the slide at index and arms its auto-advance. Must be
-// called from the Fyne main goroutine.
+// called from the run-loop goroutine.
 //
-// instant=true shows the thumbnail immediately (manual nav, resume);
-// instant=false swaps straight to the finished frame with no thumbnail
-// flash (auto-advance) — this preserves pre-existing visible behaviour now
-// that decoding always happens off the UI thread (previously the ticker
-// goroutine decoded inline inside fyne.Do).
+// instant=true presents the thumbnail (or black, if the slide is corrupt
+// and has no thumbnail) immediately; instant=false swaps straight to the
+// finished frame with no thumbnail flash (auto-advance) once decoding
+// completes — preserving today's show-something-immediately behaviour in
+// intent, now that decoding always happens off the run-loop goroutine.
 func (s *Slideshow) show(index int, instant bool) {
 	s.current = index
 	gen := s.generation.Add(1)
 	sl := s.slides[index]
 
-	if instant && sl.thumb != nil {
-		s.img.Image = sl.thumb
-		s.img.Refresh()
+	if instant {
+		frame := compositeLetterboxed(sl.thumb, s.width, s.height)
+		if err := s.renderer.Present(frame); err != nil {
+			log.Printf("presenting slide %s: %v", sl.path, err)
+		}
 	}
 
 	s.startImageDecode(sl.path, gen)
 	s.scheduleAdvance(s.interval)
 }
 
-// startImageDecode decodes and fits path in the background, then swaps it
-// in on the Fyne main goroutine if gen is still current.
+// startImageDecode decodes and fits path in the background, then posts the
+// result into cmdCh for the run loop to present if gen is still current. A
+// decode failure (including a corrupt source image) posts a nil image,
+// which compositeLetterboxed renders as a solid black frame — Mural's own
+// definition of what a corrupt slide looks like.
 func (s *Slideshow) startImageDecode(path string, gen int64) {
-	winSize := s.winSize
+	width, height := s.width, s.height
 	go func() {
 		if s.generation.Load() != gen {
 			return
 		}
-		sz := winSize()
-		fitted, err := decodeAndFit(path, sz.Width, sz.Height)
+		img, err := decodeAndFit(path, width, height)
 		if err != nil {
 			log.Printf("decoding %s: %v", path, err)
-			return
+			img = nil
 		}
 		if s.generation.Load() != gen {
 			return
 		}
-		fyne.Do(func() {
-			if s.generation.Load() != gen {
-				return
-			}
-			s.img.Image = fitted
-			s.img.Refresh()
-		})
+		select {
+		case s.cmdCh <- decodeResultMsg{gen: gen, img: img}:
+		case <-s.ctx.Done():
+		}
 	}()
 }
 
-// Run loads images, opens the window, and blocks until the user quits.
-func (s *Slideshow) Run() error {
+// handleNavKey applies today's exact key precedence, ported directly from
+// main.go's former SetOnTypedKey switch: NavQuit and NavSleep act
+// unconditionally and are checked first, and neither counts as the key
+// that resumes a paused sign. Every other key resumes a paused sign first,
+// then (for NavLeft/NavRight/NavHome) performs its navigation.
+func (s *Slideshow) handleNavKey(key NavKey) {
+	switch key {
+	case NavQuit:
+		s.cancel()
+		return
+	case NavSleep:
+		s.pause()
+		return
+	}
+
+	if s.paused {
+		s.resume()
+	}
+
+	n := len(s.slides)
+	switch key {
+	case NavRight:
+		s.show((s.current+1)%n, true)
+	case NavLeft:
+		s.show((s.current-1+n)%n, true)
+	case NavHome:
+		s.show(0, true)
+	}
+}
+
+// handleCommand applies one message posted into cmdCh.
+func (s *Slideshow) handleCommand(msg any) {
+	switch m := msg.(type) {
+	case pauseMsg:
+		s.pause()
+	case reloadRequestMsg:
+		s.startReload()
+	case reloadResultMsg:
+		if m.err != nil {
+			log.Printf("slideshow reload: %v", m.err)
+			return
+		}
+		if len(m.slides) == 0 {
+			log.Printf("slideshow reload: no images found in %s", s.dir)
+			return
+		}
+		s.slides = m.slides
+		s.current = 0
+		s.resume()
+	case decodeResultMsg:
+		if s.generation.Load() != m.gen {
+			return // stale — a newer show() has since superseded this decode
+		}
+		frame := compositeLetterboxed(m.img, s.width, s.height)
+		if err := s.renderer.Present(frame); err != nil {
+			log.Printf("presenting decoded frame: %v", err)
+		}
+	case advanceMsg:
+		if s.paused {
+			return
+		}
+		s.advanceToNext()
+	}
+}
+
+// handleVTEvent reacts to a VT switch reported by vt.go. On reacquire, the
+// current slide is redrawn now that DRM master and the CRTC mode have been
+// restored; on release, nothing else is needed — Present calls simply fail
+// (loudly logged, like any other display error) until the VT is reacquired.
+func (s *Slideshow) handleVTEvent(ev vtEvent) {
+	if ev == vtEventAcquired {
+		s.show(s.current, true)
+	}
+}
+
+// Run scans the content directory and runs the slideshow until ctx (stored
+// at construction) is done. cancel is invoked by NavQuit to trigger that
+// shutdown; navEvents and vtEvents are optional (vtEvents may be nil when
+// there is no VT to own, i.e. under HeadlessRenderer) and are read directly
+// in the run loop's select — a nil channel there simply never fires.
+func (s *Slideshow) Run(cancel context.CancelFunc, navEvents <-chan NavKey, vtEvents <-chan vtEvent) error {
 	slides, err := s.scanSlides(nil)
 	if err != nil {
 		return err
@@ -306,31 +453,15 @@ func (s *Slideshow) Run() error {
 	if len(slides) == 0 {
 		return fmt.Errorf("no images found in %s", s.dir)
 	}
-
 	s.slides = slides
-
-	a := app.New()
-	w := a.NewWindow("Mural Digital")
-	w.Resize(fyne.NewSize(800, 450))
-	w.SetPadded(false)
-
-	bg := canvas.NewRectangle(color.Black)
-	s.img = canvas.NewImageFromImage(s.slides[0].thumb)
-	s.img.FillMode = canvas.ImageFillContain
-	w.SetContent(container.NewStack(bg, s.img))
-
-	s.winSize = w.Canvas().Size
+	s.cancel = cancel
+	s.navCh = navEvents
+	s.vtCh = vtEvents
 
 	if s.startPaused {
 		s.pause()
 	} else {
-		// Defer the initial show onto the event loop so it runs after the
-		// first layout pass: w.Canvas().Size() still reports the
-		// pre-layout placeholder size if called inline here, which the
-		// slide self-corrects at its next decode.
-		fyne.Do(func() {
-			s.show(0, true)
-		})
+		s.show(0, true)
 		go func() {
 			if err := s.cec.TurnOn(); err != nil {
 				log.Printf("CEC TurnOn (startup): %v", err)
@@ -338,33 +469,20 @@ func (s *Slideshow) Run() error {
 		}()
 	}
 
-	w.Canvas().SetOnTypedKey(func(ev *fyne.KeyEvent) {
-		// Handle non-nav keys.
-		switch ev.Name {
-		case fyne.KeyEscape:
-			a.Quit()
-			return
-		case fyne.KeyDelete:
-			s.pause() // simulate schedule off
-			return
+	for {
+		select {
+		case <-s.ctx.Done():
+			return nil
+		case msg := <-s.cmdCh:
+			s.handleCommand(msg)
+		case key := <-s.navCh:
+			s.handleNavKey(key)
+		case ev, ok := <-s.vtCh:
+			if !ok {
+				s.vtCh = nil // closed: disable this case rather than busy-select on it
+				continue
+			}
+			s.handleVTEvent(ev)
 		}
-		// Any other key wakes the display.
-		if s.paused {
-			s.resume() // also sends CEC TurnOn
-			// fall through so the key also performs its nav action
-		}
-		n := len(s.slides)
-		switch ev.Name {
-		case fyne.KeyRight:
-			s.show((s.current+1)%n, true)
-		case fyne.KeyLeft:
-			s.show((s.current-1+n)%n, true)
-		case fyne.KeyHome:
-			s.show(0, true)
-			go s.Reload()
-		}
-	})
-
-	w.ShowAndRun()
-	return nil
+	}
 }

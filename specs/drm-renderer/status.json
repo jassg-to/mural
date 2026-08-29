@@ -1,9 +1,8 @@
 {
   "feature": "drm-renderer",
-  "status": "ready",
-  "current_step": 0,
-  "total_steps": 33,
-  "completed_steps": [],
+  "status": "in-progress",
+  "current_step": 32,
+  "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
   "errors": [],
-  "notes": "Phase 1 + Phase 2 + Phase 3 (two-round critic) all complete. Round 1: 2 blocker + 3 warning. Round 2 (fresh-eyes): 1 blocker + 5 warning + 2 notes. All applied."
+  "notes": "All-software steps (1-31) complete. Whole package builds, vets, and passes `go test -race` clean; binary links (~4.5MB) for the first time on this NixOS dev box, which could never link the old Fyne/CGo/X11 build. Steps 32-33 (Hardware Validation) require the physical pi3b.local board and are explicitly gated per Analyst.md's carried prerequisite: Step 32 requires confirming a board-recovery plan (spare SD card / serial console / restored remote access) BEFORE any on-hardware DRM test, since a bug can leave the board running but unreachable, with no console. Stopped here pending that confirmation from the user rather than proceeding onto real hardware unsupervised."
 }

@@ -9,7 +9,14 @@ CURRENT_USER=$(id -un)
 # ── 1. System packages ────────────────────────────────────────────────────────
 echo "Installing system packages..."
 sudo apt update
-sudo apt install -y xinit ratpoison cec-utils libgl1 unclutter x11-xserver-utils
+sudo apt install -y cec-utils
+
+# Mural talks to DRM/KMS and evdev directly, as an unprivileged user — no
+# root, no setuid, no elevated capabilities. That requires membership in the
+# groups that own /dev/dri/card* and /dev/input/event* (conventionally
+# 'video' and 'input'). Takes effect on next login/reboot.
+echo "Adding ${CURRENT_USER} to the video and input groups..."
+sudo usermod -aG video,input "$CURRENT_USER"
 
 # ── 2. Binary from GitHub Releases ───────────────────────────────────────────
 ARCH=$(uname -m)
@@ -26,25 +33,7 @@ mkdir -p "$INSTALL_DIR"
 curl -fsSL "$BINARY_URL" -o "$INSTALL_DIR/mural"
 chmod +x "$INSTALL_DIR/mural"
 
-# ── 3. Dotfiles ───────────────────────────────────────────────────────────────
-echo "Writing dotfiles..."
-
-cat > "$HOME/.ratpoisonrc" <<'EOF'
-set border 0
-EOF
-
-cat > "$HOME/.xinitrc" <<'EOF'
-xset s off
-xset -dpms
-xset s noblank
-
-ratpoison &
-unclutter -idle 0 -root &
-cd ~/mural
-exec ./mural
-EOF
-
-# ── 4. Content directory + sample schedule ────────────────────────────────────
+# ── 3. Content directory + sample schedule ────────────────────────────────────
 mkdir -p "$CONTENT_DIR"
 
 if [ ! -f "$CONTENT_DIR/config.toml" ]; then
@@ -80,17 +69,19 @@ last = [ "18:00-22:00"]
 EOF
 fi
 
-# ── 5. Done ───────────────────────────────────────────────────────────────────
+# ── 4. Done ───────────────────────────────────────────────────────────────────
 echo ""
 echo "mural installed successfully."
 echo ""
 echo "Next steps:"
 echo "  1. Copy images (JPG/PNG) into $CONTENT_DIR"
 echo "  2. Edit $CONTENT_DIR/config.toml to set your display hours and slideshow settings"
-echo "  3. Type 'startx' to launch"
+echo "  3. Log out and back in (or reboot) for the video/input group membership to take effect"
+echo "  4. Run '$INSTALL_DIR/mural $CONTENT_DIR' from a text console to launch manually,"
+echo "     or configure automatic startup below"
 echo ""
 
-# ── 6. Offer full system setup ────────────────────────────────────────────────
+# ── 5. Offer full system setup ────────────────────────────────────────────────
 printf "Configure automatic startup (autologin + auto-launch on boot)? [Y/n] "
 read -r response </dev/tty
 case "${response,,}" in
@@ -100,7 +91,8 @@ case "${response,,}" in
 #!/usr/bin/env bash
 [ "$(tty)" != "/dev/tty1" ] && exit 1
 
-startx
+cd ~/mural
+exec ./mural
 
 cat <<'BANNER'
     ************************************************************
@@ -141,7 +133,7 @@ DROPINEOF
     ;;
 esac
 
-# ── 7. Offer Samba shared folder ───────────────────────────────────────────
+# ── 6. Offer Samba shared folder ───────────────────────────────────────────
 printf "Set up Samba file sharing (access content folder from your network)? [Y/n] "
 read -r response </dev/tty
 case "${response,,}" in
