@@ -3,8 +3,9 @@
 > Phase 1 — Problem definition. Approved before architecture begins.
 
 *The directory name `drm-renderer` is shorthand. The feature is the replacement
-of Mural's entire presentation layer — display output, input handling, and
-slide-to-slide animation — not a display backend in isolation.*
+of Mural's entire presentation layer — display output and input handling — not
+a display backend in isolation. Slide-to-slide animation is explicitly out of
+scope; see* Scope *below.*
 
 ## Goal / Outcome
 
@@ -42,25 +43,32 @@ all three, because a plan that serves only the first will build the wrong thing:
    every watt spent running a windowing system to display one image is a
    megabyte and a watt that buys nothing.
 
-2. **Transitions must come back, natively.** Mural briefly supported video
-   playback and it was just removed wholesale (`video.go` and its tests deleted;
-   `slideshow.go` and `main.go` reverted to images only), because a hardware
-   spike found Mural's in-process frame-streaming had severe frame jitter on
-   this board. But the removal exposed what that feature was *for*: the video
-   files were never general-purpose video. They were **slide transitions** —
-   *"just a fancy slideshow with rich transitions"*, in the user's own words.
-   The capability that was actually wanted was never video playback and should
-   never have been built as video playback. It must return as what it always
-   was: animated transitions between image slides, rendered by Mural itself.
+2. **Transitions are a known future want, and are explicitly not being built
+   here.** Mural briefly supported video playback and it was just removed
+   wholesale (`video.go` and its tests deleted; `slideshow.go` and `main.go`
+   reverted to images only), because a hardware spike found Mural's in-process
+   frame-streaming had severe frame jitter on this board. The removal exposed
+   what that feature was *for*: the video files were never general-purpose
+   video. They were **slide transitions** — *"just a fancy slideshow with rich
+   transitions"*, in the user's own words. That want is real, but the user has
+   since decided to keep it out of this feature: this rewrite replaces the
+   rendering and input layers on a like-for-like basis, with the auto-advance
+   and manual-navigation swap staying exactly as instantaneous as it is today.
+   Animation of any kind — crossfade included — is a separate future feature,
+   scoped on its own once this layer exists to build it on.
 
 3. **Navigability is a hard project goal, and the old approach broke it.**
    There is a physical three-key input device, and it — not a keyboard — is the
    real interface to a deployed sign. Most of the key bindings in the code today
-   are debug scaffolding, not the intended interface. A video-as-transition is
-   an opaque stream that plays through; you cannot navigate out of the middle of
-   it the way you can step off an image slide. Native transitions must not
-   inherit that flaw: **the sign must be navigable at every instant, including
-   mid-transition.**
+   are debug scaffolding, not the intended interface. A video-as-transition was
+   an opaque stream that played through; you could not navigate out of the
+   middle of it the way you can step off an image slide. That is part of why
+   animation is being kept out of this feature rather than rebuilt inside it —
+   whenever transitions are eventually designed, they must not reintroduce a
+   state that navigation cannot interrupt. For now, with no transition in play,
+   **the sign must be navigable at every instant** simply means what it does
+   today: a key press takes effect immediately, slide to slide, with nothing in
+   between.
 
    The three keys have since been defined by the user: **Left = previous slide,
    Right = next slide, Home = jump to the first slide.** Pure navigation, one
@@ -70,11 +78,11 @@ Reframed honestly, Mural is a fullscreen image compositor with a timer, a
 schedule, and a three-key remote. That job does not need a GUI toolkit, and on
 this hardware it cannot afford one.
 
-**Target outcome:** the same visible behaviour a viewer sees today, plus
-transitions, with no windowing system, no C toolchain, a single static binary in
-the neighbourhood of 5MB (against today's ~30-40MB dynamically linked), and a
-steady-state footprint in the 25-40MB RSS range against the current stack's
-~218MB.
+**Target outcome:** the same visible behaviour a viewer sees today — no
+animation added, none removed — with no windowing system, no C toolchain, a
+single static binary in the neighbourhood of 5MB (against today's ~30-40MB
+dynamically linked), and a steady-state footprint in the 25-40MB RSS range
+against the current stack's ~218MB.
 
 ## Scope
 
@@ -89,8 +97,6 @@ steady-state footprint in the 25-40MB RSS range against the current stack's
 - **Implementing the defined navigation interface** — Left, Right, Home, as
   settled by the user — and deliberately retiring the debug-only gestures rather
   than porting them. See *Rules & Constraints*.
-- **A native animated crossfade between image slides**, interruptible by
-  navigation at any point during the animation.
 - **Removing Fyne, X11, `ratpoison`, `unclutter`, and CGo from the project** —
   which reaches past the Go source into `install.sh`, `docs/INSTALL.md`,
   `README.md`, `CLAUDE.md`, and `.github/workflows/build.yaml`.
@@ -109,19 +115,20 @@ steady-state footprint in the 25-40MB RSS range against the current stack's
 
 **Excluded (non-goals):**
 
-- **Video playback, in any form.** Deliberately removed, and the transitions
-  requirement is explicitly *not* a re-entry vector for it. A transition is a
-  computed animation between two decoded still images. If any part of the plan
-  starts decoding a video file, scope has slipped.
+- **Video playback, in any form.** Deliberately removed. Neither this feature
+  nor the future transitions feature it defers to is a re-entry vector for it —
+  a transition, whenever it is eventually built, is a computed animation
+  between two decoded still images. If any part of any future plan starts
+  decoding a video file, scope has slipped.
 - **Kodi launcher mode.** The user has stated plainly that this is speculative —
   *"maybe someday"*, not a committed plan. It must not be treated as a
   load-bearing future requirement, and no interface, abstraction, or hook may be
   introduced in this feature to accommodate it. *If it is ever built, it will be
   scoped on its own evidence.*
 - **GPU acceleration, 3D, EGL/GBM/GLES, or Wayland.** The pure-Go constraint
-  rules out the GPU stack; composition is on the CPU. *This has a real
-  consequence for the transitions requirement, recorded as a risk below rather
-  than waved through here.*
+  rules out the GPU stack; composition is on the CPU. This feature does no
+  animation, so the constraint costs nothing here — it becomes load-bearing
+  again whenever a future transitions feature is built on top of this layer.
 - **Any on-screen text, menu, status overlay, error message, or configuration
   UI.** Mural draws images on black and nothing else. This is consistent with
   `specs/usb-stick-hotplug`, which independently declares on-screen UI a
@@ -137,10 +144,12 @@ steady-state footprint in the 25-40MB RSS range against the current stack's
   board. No dual backend, no build-tagged toolkit fallback, no portability seam
   maintained on spec. *This is a removal of an unbuilt intention rather than of a
   working capability — see* Rules & Constraints.
-- **Transitions beyond a crossfade.** Settled by the user: a simple crossfade,
-  chosen deliberately over pan/zoom and other richer effects to stay comfortably
-  inside the CPU budget. Additional transition styles are a separate feature if
-  they are ever wanted.
+- **Slide-to-slide animation, including a simple crossfade.** Deliberately
+  moved out of scope. This feature replaces display output and input handling
+  only; the auto-advance swap and manual navigation remain instantaneous,
+  exactly as they are today. Transitions — whatever form they eventually take,
+  crossfade included — are a separate future feature, to be scoped and
+  measured on their own once the rendering layer exists to build them on.
 - **Audio.** Mural has never had it and does not gain it.
 - **The NixOS migration.** Related, mutually beneficial, and separately scoped in
   `specs/nixos-deployment`. See the independence rule below.
@@ -164,23 +173,6 @@ the physical three-key device, whatever its final semantics turn out to be.
   its log, and must not present as a silent black screen.
 - When the display resolution is determined, it must be discovered from the
   connected display rather than configured, and the slide decode must target it.
-
-**Transitions**
-
-- When the auto-advance interval elapses, the system must move to the next slide
-  with a visible crossfade rather than an instantaneous swap.
-- When a transition is in progress, the system must remain fully responsive to
-  navigation input — a nav key pressed mid-transition must take effect
-  immediately, without waiting for the animation to complete.
-- When a transition is interrupted by navigation, the system must move to the
-  newly selected slide without visual corruption and without leaving a partially
-  blended frame on screen.
-- When navigation events arrive faster than transitions can render — a held key,
-  a bouncing switch, an impatient operator — the system must remain responsive
-  and must not accumulate a backlog of queued transitions.
-- When the display cannot sustain the transition's frame rate, the transition
-  must degrade in smoothness and still arrive at the correct destination slide.
-  It must never stall the slideshow, and it must never miss the destination.
 
 **Navigation and input**
 
@@ -211,6 +203,9 @@ the physical three-key device, whatever its final semantics turn out to be.
 
 **Preserved behaviour**
 
+- When a slide changes — by auto-advance or by navigation — the change is an
+  instantaneous swap, exactly as it is today. This feature adds no transition
+  or animation of any kind.
 - When the schedule turns the sign off, the display must black out, the advance
   timer must stop, and CEC standby must be sent — unchanged from today.
 - When the content directory is rescanned and the slide set is replaced, the
@@ -296,47 +291,6 @@ the physical three-key device, whatever its final semantics turn out to be.
   Signal handling and mode restoration are therefore hard requirements, and their
   interaction with the guarded restart loop must be designed rather than assumed.
 
-- **Composition happens on the CPU, and the transitions requirement is what
-  makes that load-bearing.** Dumb buffers mean no GPU involvement: every
-  transition frame is blended by the Cortex-A53 and then written into a
-  write-combined framebuffer mapping. A 1920x1080 XRGB8888 crossfade is roughly
-  two million pixel blends per frame; at 30fps that is ~62M blends per second
-  plus the copy, on a board that already thermally soft-limits (1400→1200MHz at
-  60-70°C) under load.
-
-  **This is the one place where the resource-optimisation goal and the
-  transitions goal can genuinely conflict.** The user has settled the target: **a
-  simple crossfade, chosen explicitly over pan/zoom and richer effects to stay
-  comfortably inside the budget.** That decision removes the ambition risk and
-  is the right call.
-
-  *It does not remove the measurement obligation, and it is worth being precise
-  about why. A crossfade is the cheapest interesting transition, but it is still
-  a **per-pixel blend of two sources across the whole frame** — arithmetically it
-  is the most expensive of the cheap options, more so than a wipe or a push,
-  which are region copies with no blending at all. "Simple" describes its visual
-  ambition, not its arithmetic. It is very likely affordable here; that is a
-  prediction, not a measurement.*
-
-  **Spike item 3 therefore still runs, but its role has changed** — from
-  determining what transition to build, to confirming the chosen one fits. If it
-  does not, a fallback ladder exists and should be walked in this order: shorten
-  the duration, reduce the transition's working resolution, drop intermediate
-  steps against a fixed frame budget, and only then reconsider the form itself.
-  **Only the last rung changes what the user asked for, and reaching it returns
-  the decision to the user rather than being taken by the architect.**
-
-- **Navigability during a transition is a stated hard requirement, and it
-  constrains the design rather than decorating it.** Input cannot be serviced by
-  whatever is blocked blending pixels or waiting on a page-flip to retire. "A nav
-  event arrives mid-transition" must be a first-class state in the design, not an
-  edge case handled afterwards.
-
-  *This is precisely the property the video-based approach lacked, and it is one
-  of the three reasons this feature exists. A plan that produces beautiful
-  transitions which must finish before the remote responds has rebuilt the
-  problem it was commissioned to remove.*
-
 - **Windows support is dropped. RESOLVED by the user — Mural is Linux-only.**
   `CLAUDE.md` states *"Target platform is Linux but we want to support Windows
   too."* Fyne provided that for free; DRM and `evdev` have no Windows equivalent.
@@ -397,10 +351,9 @@ the physical three-key device, whatever its final semantics turn out to be.
   navigation, pause blanks and stops the timer, advance timing is what the config
   says. Those guarantees are exactly what a rendering rewrite is most likely to
   break quietly. They must be re-expressed against the new layer, not lost in
-  translation. *And the new layer needs coverage of its own: compositing,
-  letterboxing, and transition progression should all be testable without
-  hardware. That is an argument about where the seam goes, which is Phase 2's to
-  settle.*
+  translation. *And the new layer needs coverage of its own: compositing and
+  letterboxing should be testable without hardware. That is an argument about
+  where the seam goes, which is Phase 2's to settle.*
 
 - **Device access is new, and must not be paid for with privilege.** `/dev/dri/
   card*` and `/dev/input/event*` require group membership (conventionally `video`
@@ -447,11 +400,9 @@ the physical three-key device, whatever its final semantics turn out to be.
 - **The role of thumbnails changes and must be re-examined rather than carried
   across.** Their purpose — put *something* on screen instantly while the full
   decode runs — survives intact. Their sizing does not obviously survive:
-  `thumb_width` (default 80px) was chosen against a Fyne canvas; the output
+  `thumb_width` (default 80px) was chosen against a Fyne canvas, and the output
   dimensions are now known and fixed at startup from the display mode rather than
-  discovered after a layout pass; and a transition needs two full frames resident
-  simultaneously, which changes the memory arithmetic that the tiny-thumbnail
-  design was optimising.
+  discovered after a layout pass.
 
   *Two artifacts of the toolkit disappear along the way and should not be
   reimplemented out of habit: the `winSize func() fyne.Size` indirection, and the
@@ -464,13 +415,6 @@ the physical three-key device, whatever its final semantics turn out to be.
   whatever Mural's compositor decides it means. Phase 2 must define it — a black
   frame being the obvious candidate — rather than inherit an accident and
   discover it on the sign.
-
-- **Transitions introduce a new duration, and its relationship to `interval` is a
-  visible behaviour change either way.** Whether a one-second crossfade is
-  consumed by the configured interval or added on top of it changes how long
-  every slide is actually on screen. There is no neutral default. It must be
-  decided explicitly, and whether the duration is configurable at all is an open
-  question below.
 
 - **This feature reaches past the Go source into deployment and CI.**
   `install.sh` `apt install`s `xinit`, `ratpoison`, `cec-utils`, `libgl1`,
@@ -540,8 +484,7 @@ the physical three-key device, whatever its final semantics turn out to be.
   same content directory, same display mode, sustained over a real rotation
   rather than sampled once at startup, and counted across every process the sign
   runs rather than just Mural's own. The target figure must also honestly include
-  the framebuffer mapping and both in-flight transition frames — a 1080p
-  XRGB8888 buffer is roughly 8MB apiece, and there will be several.
+  the framebuffer mapping itself — a 1080p XRGB8888 buffer is roughly 8MB.
 
 - **Sizing input, offered as an order of magnitude and not as a commitment.**
   Prior analysis put this at roughly 10-18 working days: DRM backend 3-5d, evdev
@@ -551,7 +494,7 @@ the physical three-key device, whatever its final semantics turn out to be.
   it is wrong in the expensive direction: one board, flaky access, and a class of
   bug that is only reproducible on the hardware it breaks.*
 
-## Spike — required before Phase 2 designs the transition path
+## Spike — required before Phase 2 designs the rendering and input layer
 
 Modelled on the hardware spike in `specs/nixos-deployment`, and for the same
 reason: the decisive unknowns here are empirical, and no amount of specification
@@ -567,27 +510,19 @@ resolves them. Phase 2 should carry this as task 1.
    `SIGKILL`, and panics, is the board left with a usable console each time?
    *This is the criterion that protects the only board, and it should be answered
    before criterion 3 rather than after.*
-3. **Crossfade throughput — confirmatory.** What frame rate can the CPU sustain
-   for a full-resolution crossfade at the display's real mode, blended and copied
-   to the framebuffer, over a sustained run rather than a burst — and does the
-   board thermally throttle while doing it? *The transition style is now fixed by
-   the user, so this confirms affordability rather than choosing a design.*
-4. **Input identity.** With the real three-key device plugged in: which
+3. **Input identity.** With the real three-key device plugged in: which
    `/dev/input/event*` node does it appear as, and do its three keys emit
    `KEY_LEFT`, `KEY_RIGHT`, and `KEY_HOME` or something else entirely? Does it
    survive unplug/replug with the same identity? *The semantics are settled; this
    establishes what to bind them to.*
-5. **Footprint.** RSS of a bare pure-Go DRM process displaying one static image,
+4. **Footprint.** RSS of a bare pure-Go DRM process displaying one static image,
    measured the way the acceptance criterion will be measured.
 
 **Exit criteria.** Items 1 and 2 are pass/fail and gate the whole approach; a
 failure returns the decision to the user rather than being designed around.
-Item 3 is **confirmatory** now that the crossfade target is fixed — a
-comfortable result closes it, and a marginal or failing one triggers the fallback
-ladder in *Rules & Constraints*, whose last rung returns to the user. Items 4 and
-5 are information-gathering: 4 supplies the keycodes to bind the settled
-semantics to, and 5 establishes whether the stated footprint target is realistic
-before it becomes a gate.
+Items 3 and 4 are information-gathering: 3 supplies the keycodes to bind the
+settled semantics to, and 4 establishes whether the stated footprint target is
+realistic before it becomes a gate.
 
 *If the spike cannot be run — no recovery path, no reliable access to the board —
 that is itself a finding to escalate before Phase 2 proceeds, not a reason to
@@ -597,11 +532,8 @@ proceed on optimism.*
 
 | Scenario | Expected behaviour |
 |----------|--------------------|
-| Nav key pressed mid-transition | Transition abandons immediately and the newly selected slide is shown. No waiting for the animation, no partially blended frame left on screen. This is a headline requirement, not an edge case, and is listed here only because it is where implementations fail |
-| Nav keys pressed faster than transitions can render | System stays responsive; intermediate transitions are skipped rather than queued. The final key press decides the destination slide |
-| Nav key held down and auto-repeating | Same as above. Must not accumulate a backlog or lag behind the operator's finger |
-| Auto-advance fires while a transition is still running | Only one transition is ever in flight; the advance timer's relationship to transition duration must be explicit, not emergent |
-| Only one slide in the content directory | Transitioning a slide to itself must be a no-op or a benign self-fade, never a flicker or a visible reload |
+| Nav key held down and auto-repeating | System stays responsive; each repeat advances one slide immediately. Must not accumulate a backlog or lag behind the operator's finger |
+| Only one slide in the content directory | Redisplaying the same slide is a no-op — never a flicker, blank, or visible reload |
 | Content directory empty at startup | Same as today: Mural exits with an error rather than starting. Not silently a black screen |
 | Content directory becomes empty on reload | Same as today: reload is refused and logged, existing rotation continues |
 | Corrupt image reached in the rotation | Stays in rotation per pre-existing behaviour; the frame shown in its place is a deliberate choice (black being the obvious one), not an accident of a nil image |
@@ -618,10 +550,9 @@ proceed on optimism.*
 | Nav device unplugged and replugged while running | Navigation works again without restarting Mural |
 | An ordinary USB keyboard is plugged in | Its Left, Right, and Home keys navigate, since the binding is by keycode rather than by device. No other key does anything. *This is the whole debug interface now, and it is worth knowing that an on-site engineer with a keyboard can no longer force a reload or stop the sign from it* |
 | Operator wants to force a content reload while standing at the sign | Not possible from the remote — `Home` no longer triggers a `Reload`. Content refreshes at scheduled turn-on, on the daily config reload, and (once built) on USB insertion. SSH is the answer otherwise. An accepted consequence of the pure-navigation decision, not an oversight |
-| Crossfade cannot hold frame rate at the display's real mode | Walk the fallback ladder: shorten duration, reduce working resolution, drop intermediate steps. Changing the transition *form* is the last rung and returns to the user |
 | Display unplugged and replugged (HDMI hotplug) | Behaviour must be defined rather than discovered. Realistic on a sign, and interacts with CEC power control, which already power-cycles the display deliberately |
-| Display's preferred mode differs from 1920x1080 | Mode is discovered, not assumed. A transition budget derived from a 1080p measurement may not hold at a larger mode, and that must not be silently untrue |
-| Schedule turns the sign off mid-transition | Transition abandons, display blacks, CEC standby is sent. Pause must not have to wait for an animation |
+| Display's preferred mode differs from 1920x1080 | Mode is discovered, not assumed |
+| Schedule turns the sign off | Display blacks and CEC standby is sent immediately — no animation to interrupt |
 | Schedule turns the sign on | Reload then CEC on, unchanged from today, with the first slide appearing without an initialisation flash |
 | Developer runs Mural on an x86 laptop inside a desktop session | Must not be a dead end. Whatever the answer is, the developer must have a way to run the program, or the feature cannot be built |
 | Windows build attempted after this change | Fails, by decision. Windows support is dropped and the documentation must say so plainly rather than leave a build that silently stopped working. *No Windows artifact was ever built or published, so nothing that worked is lost* |
@@ -638,7 +569,6 @@ decisions to make with the user in the loop. None should be silently defaulted.
 | Question | Status |
 |----------|--------|
 | How is the board recovered if a DRM bug takes the display? | **OPEN — ELEVATED. Blocks the spike, and the spike is Phase 2's task 1.** Spare SD card with the known-good Debian/X install, serial console on the UART pins, or restored and verified remote access. One board, no confirmed spare card, Tailscale logged out, drifting LAN IP. *This was already the most operationally dangerous item; settling the three design questions promoted it to the front of the queue simply by clearing everything ahead of it. It is now the single thing standing between Phase 2 and its first task* |
-| How long does a crossfade last, and is it configurable? | **OPEN — answer early in Phase 2.** Now the only remaining transition parameter. And, separately: is the duration consumed by the configured `interval` or added to it? Either choice changes how long each slide is actually on screen; there is no neutral default. *Worth deciding before spike item 3 runs, so the measurement is taken against the duration that will actually ship* |
 | What keycodes does the physical device emit? | **OPEN — empirical, not a decision.** The semantics are settled (Left/Right/Home); whether the device enumerates as a USB HID keyboard and actually sends `KEY_LEFT`/`KEY_RIGHT`/`KEY_HOME` must be read off the device. Spike item 4 |
 | Where does this sit relative to the NixOS work? | **OPEN — ELEVATED slightly, sequencing rather than design.** Both features are now at or near their implementation gate, both intend to change or retire `install.sh`, and both touch the kiosk session. *Previously this could wait; with both specs approaching Phase 2 it should be decided before either starts implementing, or the collision happens in exactly one file* |
 | Is the resource target a hard gate or a direction? | **OPEN.** If the result lands at 60MB rather than 40MB, is that a failed feature or a successful one? It matters, because it decides how much optimisation effort is justified once the thing works at all |
@@ -652,10 +582,10 @@ decisions to make with the user in the loop. None should be silently defaulted.
 |----------|--------|
 | **What are the three keys, and what does each one do?** | **RESOLVED by the user. Left = previous slide. Right = next slide. Home = jump to the first slide.** Pure navigation, one behaviour per key, nothing overloaded. All other current bindings are the debug cruft this phase flagged and are dropped: `Home`'s second job of triggering a `Reload`, `Delete`'s simulated schedule-off, and `Escape`'s quit. *Two consequences recorded in* Rules & Constraints: *resume-from-pause still works, since all three keys are nav keys; and there is no longer a manual gesture to force a content reload, which is an accepted consequence of "no dual-purpose behaviour" rather than an oversight* |
 | **Does the project still intend to support Windows?** | **RESOLVED by the user: no. Dropped entirely.** Mural is Linux/Pi-only. No dual backend, no build-tagged toolkit fallback, no portability seam maintained on spec — Phase 2 should not build one. *Cheaper than it looks: `.github/workflows/build.yaml` was inspected and ships exactly three targets, all `GOOS: linux`. No Windows artifact was ever built, published, or tested, so what is retired is an intention in `CLAUDE.md` and some MSYS2/TDM-GCC instructions in `README.md`, not a working platform.* **Note this does not answer the developer's need to run Mural off the sign** — that requirement survives independently and is now the only thing that could justify a second output path |
-| **What transitions are actually wanted?** | **RESOLVED by the user: a simple crossfade, and nothing more.** Chosen deliberately over pan/zoom and richer effects to sit comfortably inside the Cortex-A53 budget. One global style; richer transitions are a separate feature if ever wanted. *Spike item 3 still runs but its role has changed from design-determining to confirmatory. Recorded honestly in* Rules & Constraints: *a crossfade is the cheapest **interesting** transition but is still a per-pixel blend across the whole frame — arithmetically dearer than a wipe or push. "Simple" describes its visual ambition, not its cost. A fallback ladder is defined, and only its last rung returns to the user* |
+| **What transitions are actually wanted?** | **SUPERSEDED — animation is now out of scope for this feature entirely.** Earlier resolved as "a simple crossfade, chosen over pan/zoom and richer effects to sit comfortably inside the Cortex-A53 budget." That decision is set aside — not because the crossfade choice was wrong, but because the user has since decided no transition ships in this feature at all. Display output and input handling ship on their own; the auto-advance and manual-nav swap stay exactly as instantaneous as they are today. Transitions, crossfade included, are a separate future feature, scoped on their own evidence once this rendering layer exists |
 | Does the sign need any maintenance gesture? | **RESOLVED by implication of the keymap decision: no.** All three keys are navigation. Forcing a reload or stopping the sign is done over SSH; content otherwise refreshes at scheduled turn-on, on the daily config reload, and (once built) on USB insertion per `specs/usb-stick-hotplug`. *Recorded rather than silently dropped, because it is a genuine reduction in what an operator standing at the sign can do* |
 | Should Mural drop Fyne, X11, `ratpoison`, `unclutter`, and CGo? | **Yes — decided by the user before this phase, on the strength of a hardware spike and an explicit optimisation directive. Not re-litigated here** |
-| Should video playback come back? | **No.** Removed deliberately. The transitions requirement replaces what video was actually being used for and is not a route back to it |
+| Should video playback come back? | **No.** Removed deliberately. What video was actually being used for was slide transitions, and that want is now deferred to a separate future feature — not a route back to video |
 | Is Kodi launcher mode a requirement this design must accommodate? | **No — explicitly speculative per the user.** No abstraction, hook, or interface may be introduced for it in this feature |
 | Which files survive the rewrite? | **Settled by inspection.** `cec.go` and `schedule.go` untouched; `main.go` is wiring only; roughly half of `slideshow.go` is already toolkit-agnostic. The Fyne-coupled surface is ~180 lines |
 | Is `nfnt/resize` retained? | **No.** Unmaintained since 2018. `golang.org/x/image/draw` is already an indirect dependency and can scale, letterbox, and blit in one call without an intermediate allocation |
@@ -663,7 +593,7 @@ decisions to make with the user in the loop. None should be silently defaulted.
 | Does the board support this at all? | **Yes.** Full KMS confirmed on the deployed board — `dtoverlay=vc4-kms-v3d`, `vc4-drm` bound across hvs/hdmi/txp/pixelvalve/v3d. Not the older fkms path |
 | Do the four Fyne-coupled tests get deleted? | **No.** They encode behavioural guarantees a rendering rewrite is most likely to break quietly. Re-expressing them against the new layer is in scope |
 | Does Mural gain any privilege? | **No.** Unprivileged kiosk user, no root, no setuid, no capabilities — reaffirming the invariant from `specs/nixos-deployment` |
-| Scope classification | **Complex — unchanged by the three resolutions.** New domain (kernel DRM ioctl ABI, `evdev`, VT signalling — none of it with in-house or third-party precedent), cross-cutting across rendering, input, build, CI, packaging, documentation, and tests. *Settling the keymap, Windows, and transition style narrowed the feature's **scope** without reducing its **difficulty**: the hand-written ioctl layer, the VT and console-recovery work, and the unmeasured CPU-composition assumption all stand exactly as they did. Full pipeline including `sdd-harden`* |
+| Scope classification | **Complex — unchanged by the three resolutions.** New domain (kernel DRM ioctl ABI, `evdev`, VT signalling — none of it with in-house or third-party precedent), cross-cutting across rendering, input, build, CI, packaging, documentation, and tests. *Settling the keymap, Windows, and moving animation out of scope narrowed the feature without simplifying what remains: the hand-written ioctl layer and the VT and console-recovery work stand exactly as they did. Full pipeline including `sdd-harden`* |
 
 ## Analyst Checklist
 
@@ -671,11 +601,11 @@ decisions to make with the user in the loop. None should be silently defaulted.
 - [x] Scope boundaries are explicit — what's in and what's out
 - [x] **All ambiguities resolved — yes.** The three blocking questions were put
       to the user and answered: navigation is Left/Right/Home and nothing else,
-      Windows is dropped entirely, and the transition is a simple crossfade. What
-      remains outstanding is not specification ambiguity but empirical unknowns
-      (what the input device emits, what the CPU sustains) and one operational
-      prerequisite (the board-recovery plan) — none of which specification can
-      answer
+      Windows is dropped entirely, and slide-to-slide animation is moved out of
+      this feature's scope entirely. What remains outstanding is not
+      specification ambiguity but empirical unknowns (what the input device
+      emits, what the footprint measures) and one operational prerequisite (the
+      board-recovery plan) — none of which specification can answer
 - [x] Behaviour is declarative, not prescriptive
 - [x] Edge cases are identified and handled
 - [x] Non-goals prevent scope creep
@@ -688,8 +618,10 @@ RESOLVED above:
 1. **Navigation** — Left = previous, Right = next, Home = first slide. Pure
    navigation; the debug bindings are dropped.
 2. **Windows** — dropped entirely. Linux-only. No portability seam.
-3. **Transitions** — a simple crossfade, deliberately chosen over richer effects
-   to stay inside the CPU budget.
+3. **Transitions** — moved out of scope entirely. This feature replaces display
+   output and input handling only; slide changes stay exactly as instantaneous
+   as they are today. Animation is a separate future feature, scoped on its own
+   once this layer exists.
 
 The architect may proceed. Two things to carry forward rather than rediscover:
 
@@ -712,6 +644,4 @@ in.
 
 Everything else in the open-questions table can be carried into Phase 2 as
 decisions to be made with the user in the loop. None should be defaulted
-silently — in particular the crossfade's duration and its relationship to
-`interval`, which is user-visible behaviour with no neutral default and is worth
-settling before spike item 3 takes its measurement.
+silently.
