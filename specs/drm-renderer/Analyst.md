@@ -59,20 +59,22 @@ all three, because a plan that serves only the first will build the wrong thing:
 
 3. **Navigability is a hard project goal, and the old approach broke it.**
    There is a physical three-key input device, and it — not a keyboard — is the
-   real interface to a deployed sign. Most of the key bindings in the code today
-   are debug scaffolding, not the intended interface. A video-as-transition was
-   an opaque stream that played through; you could not navigate out of the
-   middle of it the way you can step off an image slide. That is part of why
-   animation is being kept out of this feature rather than rebuilt inside it —
-   whenever transitions are eventually designed, they must not reintroduce a
-   state that navigation cannot interrupt. For now, with no transition in play,
-   **the sign must be navigable at every instant** simply means what it does
-   today: a key press takes effect immediately, slide to slide, with nothing in
-   between.
+   real interface to a deployed sign for day-to-day navigation. A
+   video-as-transition was an opaque stream that played through; you could not
+   navigate out of the middle of it the way you can step off an image slide.
+   That is part of why animation is being kept out of this feature rather than
+   rebuilt inside it — whenever transitions are eventually designed, they must
+   not reintroduce a state that navigation cannot interrupt. For now, with no
+   transition in play, **the sign must be navigable at every instant** simply
+   means what it does today: a key press takes effect immediately, slide to
+   slide, with nothing in between.
 
-   The three keys have since been defined by the user: **Left = previous slide,
-   Right = next slide, Home = jump to the first slide.** Pure navigation, one
-   behaviour per key, nothing overloaded.
+   The three keys on the physical remote have been defined by the user: **Left
+   = previous slide, Right = next slide, Home = jump to the first slide.**
+   The user has since decided to also keep the rest of the existing keyboard
+   bindings rather than treat them as debug scaffolding to be dropped — see the
+   navigation-interface rule in *Rules & Constraints* for the full, revised set
+   of five bindings.
 
 Reframed honestly, Mural is a fullscreen image compositor with a timer, a
 schedule, and a three-key remote. That job does not need a GUI toolkit, and on
@@ -94,9 +96,10 @@ against the current stack's ~218MB.
 - **Replacing the input path.** Reading the physical navigation device directly
   from the kernel. This is net-new code: Fyne supplies input today and there is
   no input handling in the repository at all.
-- **Implementing the defined navigation interface** — Left, Right, Home, as
-  settled by the user — and deliberately retiring the debug-only gestures rather
-  than porting them. See *Rules & Constraints*.
+- **Implementing the defined input interface** — Left, Right, Home, Delete, and
+  Escape, plus any-key-wakes, as settled by the user. `Home`'s second job of
+  triggering a `Reload` is the one binding still deliberately retired rather
+  than ported. See *Rules & Constraints*.
 - **Removing Fyne, X11, `ratpoison`, `unclutter`, and CGo from the project** —
   which reaches past the Go source into `install.sh`, `docs/INSTALL.md`,
   `README.md`, `CLAUDE.md`, and `.github/workflows/build.yaml`.
@@ -184,8 +187,14 @@ the physical three-key device, whatever its final semantics turn out to be.
   preserving today's show-something-immediately behaviour in intent.
 - When the slide set is stepped past either end, it must wrap, preserving
   today's behaviour.
-- When the system is paused, any nav key must resume it: display power on via
-  CEC, current slide redisplayed, auto-advance re-armed. Unchanged from today.
+- When Delete is pressed, the system must sleep the display exactly as the
+  schedule's off transition does: blank the display, stop the advance timer,
+  and send CEC standby when CEC is available. Unchanged from today.
+- When Escape is pressed, Mural must exit. Unchanged from today.
+- When the system is paused and any key is pressed, that key must first resume
+  it — display power on via CEC, current slide redisplayed, auto-advance
+  re-armed — the same as today. Escape and Delete are the exception: they act
+  immediately regardless of pause state and do not themselves trigger a resume.
 - When the navigation device is absent at startup, Mural must still start and
   still run the schedule-driven rotation. A sign with no remote is a working
   sign.
@@ -366,36 +375,58 @@ the physical three-key device, whatever its final semantics turn out to be.
   nothing, because a device node is unreadable. It deserves the same treatment —
   an explicit verification item, not an assumption.*
 
-- **The navigation interface is three keys and nothing else. RESOLVED by the
-  user.** **Left = previous slide. Right = next slide. Home = jump to the first
-  slide.** Pure navigation, one behaviour per key, no overloading.
+- **The input interface is five single-purpose bindings, not three. REVISED by
+  the user after this phase's initial approval.** **Left = previous slide.
+  Right = next slide. Home = jump to the first slide. Delete = sleep the
+  display. Escape = quit.** Each key still does exactly one thing — nothing is
+  overloaded — but the user has decided to keep the full existing keyboard
+  arrangement rather than treat everything but Left/Right/Home as debug
+  scaffolding to be dropped.
 
-  Everything else the current handler does is debug scaffolding and is dropped:
-  `Home`'s second job of triggering a `Reload`, `Delete`'s simulated
-  schedule-off, and `Escape`'s quit. *Losing `Escape` is a straightforward
-  improvement — allowing the remote to terminate an unattended sign was a hazard.*
+  **This is a reversal of this phase's original resolution, not an oversight,
+  and the reasoning behind the original call is worth keeping on record rather
+  than silently erasing.** The initial decision dropped `Escape` specifically
+  because *"allowing the remote to terminate an unattended sign was a
+  hazard."* That concern is still true — Escape gives anyone at the keyboard
+  the ability to stop the sign — and the user has decided to accept it anyway,
+  in exchange for keeping a familiar, already-tested input arrangement. `Home`'s
+  second job of triggering a `Reload` is the **one** binding from the original
+  arrangement that stays dropped; the user did not ask for it back, and nothing
+  here reopens that specific consequence (see below).
 
-  **Two consequences are worth stating so they are not discovered later.**
+  **Only one of the three keys on the physical remote can reach `Escape` or
+  `Delete` at all** — the remote is still Left/Right/Home only, per its
+  physical layout. `Escape` and `Delete` are reachable only from an attached
+  keyboard, exactly as they are today.
 
-  *First, resume-from-pause still works.* Today "any nav key resumes"; with all
-  three keys being nav keys, any of the three resumes, and the behaviour carries
-  over intact with no gap.
+  **Precedence must match today's exactly**, since that is the behaviour being
+  kept, not redesigned: `Escape` and `Delete` act immediately regardless of
+  pause state and do not themselves count as the key that resumes a paused
+  sign. Every other key — including `Left`, `Right`, `Home`, and any unbound
+  key — resumes a paused sign first if one is paused, then (for `Left`/`Right`/
+  `Home`) performs its navigation.
 
-  *Second, there is no longer a manual gesture to pick up new content.* `Home`
-  currently triggers a `Reload` and will no longer do so. Content refresh
-  therefore happens at scheduled turn-on, on the daily config reload, and — once
-  `specs/usb-stick-hotplug` is built — on stick insertion. **That is a real
-  reduction in what an operator standing at the sign can do**, and it is a direct
-  consequence of the "no dual-purpose behaviour" instruction rather than an
-  oversight. It is recorded as an accepted consequence, with SSH remaining the
-  answer for anyone who needs to force a reload now. *If it turns out to matter
-  in practice, restoring it is a small follow-up, not a redesign.*
+  **Two consequences from the original resolution are unaffected by this
+  reversal and are worth stating so they are not re-litigated.**
 
-  Separately and empirically: what the device actually emits — whether it
-  presents as a USB HID keyboard, and whether its three keys really send
-  `KEY_LEFT`, `KEY_RIGHT`, and `KEY_HOME` — must be answered by plugging it in
-  and reading raw events. **The semantics are settled; the keycodes are not.**
-  Spike item 4.
+  *First, resume-from-pause still works exactly as before* for `Left`, `Right`,
+  and `Home` — nothing about this reversal changes that.
+
+  *Second, there is still no manual gesture to pick up new content.* `Home`
+  currently triggers a `Reload` and will no longer do so — this part of the
+  original decision stands. Content refresh therefore happens at scheduled
+  turn-on, on the daily config reload, and — once `specs/usb-stick-hotplug` is
+  built — on stick insertion. **That remains a real reduction in what an
+  operator standing at the sign can do**, with SSH remaining the answer for
+  anyone who needs to force a reload. *If it turns out to matter in practice,
+  restoring it is a small follow-up, not a redesign.*
+
+  Separately and empirically: what the physical remote actually emits —
+  whether it presents as a USB HID keyboard, and whether its three keys really
+  send `KEY_LEFT`, `KEY_RIGHT`, and `KEY_HOME` — must still be answered by
+  plugging it in and reading raw events. **The semantics are settled; the
+  keycodes are not.** Spike item 3 (renumbered after the transitions spike item
+  was removed).
 
 - **The role of thumbnails changes and must be re-examined rather than carried
   across.** Their purpose — put *something* on screen instantly while the full
@@ -548,7 +579,7 @@ proceed on optimism.*
 | Mural lacks permission on the DRM or input device | Clear, specific error naming the device and the likely group. Not a generic permission failure, and not silence |
 | Nav device absent at startup | Mural starts normally and runs the schedule. A sign with no remote is a working sign |
 | Nav device unplugged and replugged while running | Navigation works again without restarting Mural |
-| An ordinary USB keyboard is plugged in | Its Left, Right, and Home keys navigate, since the binding is by keycode rather than by device. No other key does anything. *This is the whole debug interface now, and it is worth knowing that an on-site engineer with a keyboard can no longer force a reload or stop the sign from it* |
+| An ordinary USB keyboard is plugged in | Its Left/Right/Home navigate, Delete sleeps the display, Escape quits, and any other key wakes the display if paused — binding is by keycode rather than by device, so the keyboard and the physical remote share the same Left/Right/Home behaviour. *An on-site engineer with a keyboard can stop the sign (Escape) or force it to sleep (Delete), but still cannot force a content reload — that gesture stays gone regardless of input device* |
 | Operator wants to force a content reload while standing at the sign | Not possible from the remote — `Home` no longer triggers a `Reload`. Content refreshes at scheduled turn-on, on the daily config reload, and (once built) on USB insertion. SSH is the answer otherwise. An accepted consequence of the pure-navigation decision, not an oversight |
 | Display unplugged and replugged (HDMI hotplug) | Behaviour must be defined rather than discovered. Realistic on a sign, and interacts with CEC power control, which already power-cycles the display deliberately |
 | Display's preferred mode differs from 1920x1080 | Mode is discovered, not assumed |
@@ -580,10 +611,10 @@ decisions to make with the user in the loop. None should be silently defaulted.
 
 | Question | Answer |
 |----------|--------|
-| **What are the three keys, and what does each one do?** | **RESOLVED by the user. Left = previous slide. Right = next slide. Home = jump to the first slide.** Pure navigation, one behaviour per key, nothing overloaded. All other current bindings are the debug cruft this phase flagged and are dropped: `Home`'s second job of triggering a `Reload`, `Delete`'s simulated schedule-off, and `Escape`'s quit. *Two consequences recorded in* Rules & Constraints: *resume-from-pause still works, since all three keys are nav keys; and there is no longer a manual gesture to force a content reload, which is an accepted consequence of "no dual-purpose behaviour" rather than an oversight* |
+| **What are the keys, and what does each one do?** | **REVISED by the user after this phase's initial approval.** Left = previous slide, Right = next slide, Home = jump to the first slide, Delete = sleep the display, Escape = quit. Each key still does exactly one thing. The original resolution had dropped `Delete` and `Escape` as debug scaffolding; the user has since decided to keep them, accepting the kiosk-hazard tradeoff `Escape` reopens. `Home`'s second job of triggering a `Reload` is the only binding that stays dropped. *Full precedence rules — Escape/Delete bypass pause state, every other key resumes first — recorded in* Rules & Constraints |
 | **Does the project still intend to support Windows?** | **RESOLVED by the user: no. Dropped entirely.** Mural is Linux/Pi-only. No dual backend, no build-tagged toolkit fallback, no portability seam maintained on spec — Phase 2 should not build one. *Cheaper than it looks: `.github/workflows/build.yaml` was inspected and ships exactly three targets, all `GOOS: linux`. No Windows artifact was ever built, published, or tested, so what is retired is an intention in `CLAUDE.md` and some MSYS2/TDM-GCC instructions in `README.md`, not a working platform.* **Note this does not answer the developer's need to run Mural off the sign** — that requirement survives independently and is now the only thing that could justify a second output path |
 | **What transitions are actually wanted?** | **SUPERSEDED — animation is now out of scope for this feature entirely.** Earlier resolved as "a simple crossfade, chosen over pan/zoom and richer effects to sit comfortably inside the Cortex-A53 budget." That decision is set aside — not because the crossfade choice was wrong, but because the user has since decided no transition ships in this feature at all. Display output and input handling ship on their own; the auto-advance and manual-nav swap stay exactly as instantaneous as they are today. Transitions, crossfade included, are a separate future feature, scoped on their own evidence once this rendering layer exists |
-| Does the sign need any maintenance gesture? | **RESOLVED by implication of the keymap decision: no.** All three keys are navigation. Forcing a reload or stopping the sign is done over SSH; content otherwise refreshes at scheduled turn-on, on the daily config reload, and (once built) on USB insertion per `specs/usb-stick-hotplug`. *Recorded rather than silently dropped, because it is a genuine reduction in what an operator standing at the sign can do* |
+| Does the sign need any content-reload gesture? | **RESOLVED by implication of the keymap decision: no.** `Home` no longer triggers a `Reload`, and none of the other four bindings (Left, Right, Delete, Escape) does either. Forcing a reload is done over SSH; content otherwise refreshes at scheduled turn-on, on the daily config reload, and (once built) on USB insertion per `specs/usb-stick-hotplug`. *Recorded rather than silently dropped, because it is a genuine reduction in what an operator standing at the sign can do. Note this is now the only surviving reduction from the original keymap decision — stopping the sign (Escape) and sleeping it (Delete) are both back* |
 | Should Mural drop Fyne, X11, `ratpoison`, `unclutter`, and CGo? | **Yes — decided by the user before this phase, on the strength of a hardware spike and an explicit optimisation directive. Not re-litigated here** |
 | Should video playback come back? | **No.** Removed deliberately. What video was actually being used for was slide transitions, and that want is now deferred to a separate future feature — not a route back to video |
 | Is Kodi launcher mode a requirement this design must accommodate? | **No — explicitly speculative per the user.** No abstraction, hook, or interface may be introduced for it in this feature |
@@ -600,12 +631,14 @@ decisions to make with the user in the loop. None should be silently defaulted.
 - [x] Goal is tied to a specific user need
 - [x] Scope boundaries are explicit — what's in and what's out
 - [x] **All ambiguities resolved — yes.** The three blocking questions were put
-      to the user and answered: navigation is Left/Right/Home and nothing else,
-      Windows is dropped entirely, and slide-to-slide animation is moved out of
-      this feature's scope entirely. What remains outstanding is not
-      specification ambiguity but empirical unknowns (what the input device
-      emits, what the footprint measures) and one operational prerequisite (the
-      board-recovery plan) — none of which specification can answer
+      to the user and answered: navigation is Left/Right/Home plus Delete
+      (sleep) and Escape (quit) — the latter two revised back in after this
+      phase's initial approval — Windows is dropped entirely, and slide-to-slide
+      animation is moved out of this feature's scope entirely. What remains
+      outstanding is not specification ambiguity but empirical unknowns (what
+      the input device emits, what the footprint measures) and one operational
+      prerequisite (the board-recovery plan) — none of which specification can
+      answer
 - [x] Behaviour is declarative, not prescriptive
 - [x] Edge cases are identified and handled
 - [x] Non-goals prevent scope creep
@@ -615,8 +648,10 @@ decisions to make with the user in the loop. None should be silently defaulted.
 All three blocking questions have been answered by the user and are recorded as
 RESOLVED above:
 
-1. **Navigation** — Left = previous, Right = next, Home = first slide. Pure
-   navigation; the debug bindings are dropped.
+1. **Navigation and input** — Left = previous, Right = next, Home = first
+   slide, Delete = sleep the display, Escape = quit. Revised after this phase's
+   initial approval to keep Delete and Escape rather than drop them; `Home`'s
+   `Reload` trigger remains the one binding that stays dropped.
 2. **Windows** — dropped entirely. Linux-only. No portability seam.
 3. **Transitions** — moved out of scope entirely. This feature replaces display
    output and input handling only; slide changes stay exactly as instantaneous

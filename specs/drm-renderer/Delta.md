@@ -4,10 +4,13 @@
 > Only exists when this feature modifies existing behaviour.
 
 **Three decisions have since been settled by the user and are written into this
-delta throughout:** navigation is **Left = previous, Right = next, Home = first
-slide** and nothing else; **Windows support is dropped entirely**; and the
-transition is **a simple crossfade**, chosen over richer effects to stay inside
-the CPU budget. No hedging against the alternatives remains.
+delta throughout:** the input arrangement is **Left = previous, Right = next,
+Home = first slide, Delete = sleep the display, Escape = quit** — the same five
+bindings as today, minus `Home`'s second job of triggering a `Reload`;
+**Windows support is dropped entirely**; and **slide-to-slide animation,
+including a simple crossfade, is moved out of this feature's scope entirely**
+— deferred to a separate future feature rather than built here. No hedging
+against the alternatives remains.
 
 **Decision recorded: full replacement of the presentation layer.** Mural drops
 Fyne, X11, `ratpoison`, `unclutter`, and CGo and replaces them with a hand-rolled
@@ -19,36 +22,19 @@ the alternatives.
 
 Two things are worth noticing about the shape of this delta before reading it.
 
-First, **the viewer-facing delta is almost empty, and the operator- and
+First, **the viewer-facing delta is empty, and the operator- and
 developer-facing delta is enormous.** Someone standing in front of the sign
-should see the same images, in the same order, letterboxed the same way, on the
-same schedule — plus transitions. Almost everything that changes changes behind
-that.
+should see the same images, in the same order, letterboxed the same way, swapped
+the same instantaneous way, on the same schedule. Every change in this document
+happens behind that.
 
-Second, **the one genuine new capability — transitions — is a restoration, not an
-addition.** It returns what the removed video feature was actually being used
-for, in the form it should have taken originally.
+Second, **transitions are not part of this delta.** The removed video feature
+was really being used for slide transitions, and that want is real — but the
+user has since decided it is a separate future feature, not a capability this
+rewrite restores. This delta replaces the rendering and input layers on a
+like-for-like basis and adds no viewer-visible capability at all.
 
 ## ADDED
-
-- **A crossfade between image slides.** The single new viewer-visible
-  capability. Slides currently swap instantaneously. *This is the restoration of
-  what the deleted `video.go` was really providing — "slick transition effects",
-  in the user's words — expressed as computed animation between two decoded
-  stills rather than as an opaque video stream.*
-
-  **One global crossfade style, deliberately modest.** The user chose it over
-  pan/zoom and richer effects specifically to stay comfortably within the
-  Cortex-A53's budget. *Worth noting the arithmetic is not as cheap as "simple"
-  suggests: a crossfade blends every pixel of two sources, where a wipe or push
-  would be a region copy. It is the cheapest **interesting** transition, not the
-  cheapest one — which is why spike item 3 still runs to confirm it fits.*
-
-- **Navigability during a transition, as an explicit guarantee.** No such
-  guarantee exists today because there is nothing to navigate out of; an
-  instantaneous swap has no middle. It is stated as a headline requirement
-  precisely because the video-based approach violated it, and that violation is
-  one of the three reasons this feature exists.
 
 - **Direct ownership of the display.** Mural becomes the process that sets the
   video mode and drives the scanout, a responsibility it has never held. Mode
@@ -116,26 +102,26 @@ for, in the form it should have taken originally.
   input code that exists today and it is replaced entirely.
 
 - **Key bindings are `Right`/`Left`/`Home`/`Delete`/`Escape`, with `Home`
-  overloaded** → **three keys, one behaviour each: Left = previous slide,
-  Right = next slide, Home = first slide.** Settled by the user. Pure navigation,
-  nothing overloaded, nothing else bound.
+  overloaded** → **the same five bindings, minus `Home`'s second job.** Left =
+  previous slide, Right = next slide, Home = first slide, Delete = sleep the
+  display, Escape = quit — unchanged from today. Only one behaviour is dropped:
+  `Home` no longer also triggers a `Reload`.
 
-  *Two current behaviours die on purpose rather than by accident, which was the
-  point of asking: `Home` doing two things at once (jump to slide 0 **and**
-  trigger a `Reload`), and `Escape` quitting — which on an unattended kiosk meant
-  the remote could kill the sign.*
+  *This phase originally planned to drop `Delete` and `Escape` too, on the
+  reasoning that they were debug scaffolding and that `Escape` in particular
+  let anyone at an attached keyboard kill an unattended sign. The user has
+  since revised that: both are kept, and the kiosk-hazard tradeoff `Escape`
+  reopens is accepted knowingly rather than avoided. `Home`'s double duty
+  (jump to slide 0 **and** trigger a `Reload`) is the one piece of the original
+  plan that still stands — the user did not ask for it back.*
 
-  **Resume-from-pause survives intact.** Today any nav key resumes; with all
-  three keys being nav keys, all three resume. No gap opens up.
+  **Precedence is unchanged from today.** `Escape` and `Delete` act
+  immediately regardless of pause state and are not themselves a resume
+  trigger; every other key — `Left`, `Right`, `Home`, or anything unbound —
+  resumes a paused sign first if one is paused.
 
-- **`Delete` simulates a schedule-off from the remote** → **removed.** Pausing
-  the sign is the schedule's job. Debug scaffolding, dropped deliberately.
-
-- **Slide changes are instantaneous** → **slide changes crossfade.** Which
-  makes the auto-advance contract newly ambiguous: whether a transition's
-  duration is consumed by the configured `interval` or added to it changes how
-  long every slide is actually on screen. *There is no neutral default; it must
-  be chosen.*
+  **Resume-from-pause survives intact.** Today any non-`Escape`/`Delete` key
+  resumes; that is unchanged.
 
 - **The output size is discovered from the toolkit after a layout pass** →
   **the output size is the display's mode, known at startup.** This removes the
@@ -163,9 +149,8 @@ for, in the form it should have taken originally.
 - **Thumbnails are small previews sized against a toolkit canvas** → **their
   purpose survives, their sizing is re-examined.** Showing *something* instantly
   while the full decode runs is still right. But `thumb_width`'s 80px default was
-  chosen against a Fyne canvas, the target size is now fixed and known at
-  startup, and a transition needs two full frames resident at once — which
-  changes the memory arithmetic the tiny-thumbnail design was optimising.
+  chosen against a Fyne canvas, and the target size is now fixed and known at
+  startup rather than discovered after a layout pass.
 
 - **The build requires CGo and a C toolchain** → **the build is pure Go and
   static.** `CGO_ENABLED=0`, no GL or X11 development headers, no `dpkg`
@@ -233,10 +218,6 @@ for, in the form it should have taken originally.
 
 - **`github.com/nfnt/resize`.** Unmaintained since 2018.
 
-- **The `Escape`-quits binding.** Allowing the remote to terminate an unattended
-  sign was a hazard, not a feature. There is now no way to stop Mural from the
-  input device at all, which is correct for a kiosk — `systemd` and SSH own that.
-
 - **The manual content-reload gesture.** `Home` currently triggers a `Reload`
   alongside its jump-to-first-slide behaviour, and under the pure-navigation
   decision it no longer will. Content refresh now happens at scheduled turn-on,
@@ -288,13 +269,11 @@ for, in the form it should have taken originally.
   ADDED.*
 
 - **Any dependency on the GPU or on a working GL stack.** Composition is on the
-  CPU. Mostly a simplification — it makes `specs/nixos-deployment`'s
-  `hardware.graphics.enable` / Mesa / `/run/opengl-driver/lib` trap irrelevant,
-  and retires that spike's Criterion 2 finding that VC4 V3D 2.1 exactly matches
-  Fyne's GL 2.1 binding.
-
-  *It is not a pure simplification. The GPU was doing the compositing work, and
-  the Cortex-A53 now inherits it at the precise moment the feature starts asking
-  for per-pixel blended animation. Whether that trade is affordable is the
-  feature's central unmeasured assumption, and it is what spike item 3 exists to
-  answer.*
+  CPU, but with no animation in this feature, that composition is a single
+  letterboxed blit per slide change rather than anything sustained. A clean
+  simplification — it makes `specs/nixos-deployment`'s `hardware.graphics.enable`
+  / Mesa / `/run/opengl-driver/lib` trap irrelevant, and retires that spike's
+  Criterion 2 finding that VC4 V3D 2.1 exactly matches Fyne's GL 2.1 binding.
+  *Unlike an animated build of this feature, there is no sustained per-pixel
+  blending workload here to measure — the CPU cost this feature actually takes
+  on is close to nothing.*
