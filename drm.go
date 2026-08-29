@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/sys/unix"
 )
 
@@ -258,7 +259,9 @@ func destroyDumbHandle(fd int, handle uint32) {
 func (r *DRMRenderer) Present(frame *image.RGBA) error {
 	src := frame
 	if src == nil {
-		src = compositeLetterboxed(nil, int(r.width), int(r.height))
+		// Scaler is unused when img is nil, so the choice here is
+		// arbitrary; CatmullRom for consistency with the other call sites.
+		src = compositeLetterboxed(nil, int(r.width), int(r.height), xdraw.CatmullRom)
 	}
 
 	back := 1 - r.front

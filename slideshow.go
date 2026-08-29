@@ -329,7 +329,11 @@ func (s *Slideshow) show(index int, instant bool) {
 	sl := s.slides[index]
 
 	if instant {
-		frame := compositeLetterboxed(sl.thumb, s.width, s.height)
+		// NearestNeighbor, not CatmullRom: this thumbnail is a fleeting
+		// placeholder, on screen only until the background decode below
+		// finishes, and measured ~13x faster on the target hardware — see
+		// compositeLetterboxed's doc comment.
+		frame := compositeLetterboxed(sl.thumb, s.width, s.height, xdraw.NearestNeighbor)
 		if err := s.renderer.Present(frame); err != nil {
 			log.Printf("presenting slide %s: %v", sl.path, err)
 		}
@@ -418,7 +422,7 @@ func (s *Slideshow) handleCommand(msg any) {
 		if s.generation.Load() != m.gen {
 			return // stale — a newer show() has since superseded this decode
 		}
-		frame := compositeLetterboxed(m.img, s.width, s.height)
+		frame := compositeLetterboxed(m.img, s.width, s.height, xdraw.CatmullRom)
 		if err := s.renderer.Present(frame); err != nil {
 			log.Printf("presenting decoded frame: %v", err)
 		}

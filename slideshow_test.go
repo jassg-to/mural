@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 func solidImage(w, h int, c color.RGBA) image.Image {
@@ -25,7 +27,7 @@ func TestCompositeLetterboxed(t *testing.T) {
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
 	t.Run("nil image produces a solid black frame", func(t *testing.T) {
-		frame := compositeLetterboxed(nil, 20, 10)
+		frame := compositeLetterboxed(nil, 20, 10, xdraw.CatmullRom)
 		if frame.Bounds().Dx() != 20 || frame.Bounds().Dy() != 10 {
 			t.Fatalf("frame size = %v, want 20x10", frame.Bounds())
 		}
@@ -43,7 +45,7 @@ func TestCompositeLetterboxed(t *testing.T) {
 		// width stays 10 — pillarboxed with black on both sides, image
 		// content occupying x=[5,15).
 		src := solidImage(10, 10, white)
-		frame := compositeLetterboxed(src, 20, 10)
+		frame := compositeLetterboxed(src, 20, 10, xdraw.CatmullRom)
 		if r, g, b, _ := frame.At(0, 5).RGBA(); r != 0 || g != 0 || b != 0 {
 			t.Errorf("left edge pixel = %v, want black (pillarbox)", frame.At(0, 5))
 		}
@@ -60,7 +62,7 @@ func TestCompositeLetterboxed(t *testing.T) {
 		// height stays 10 — letterboxed with black top and bottom, image
 		// content occupying y=[5,15).
 		src := solidImage(10, 10, white)
-		frame := compositeLetterboxed(src, 10, 20)
+		frame := compositeLetterboxed(src, 10, 20, xdraw.CatmullRom)
 		if r, g, b, _ := frame.At(5, 0).RGBA(); r != 0 || g != 0 || b != 0 {
 			t.Errorf("top edge pixel = %v, want black (letterbox)", frame.At(5, 0))
 		}
@@ -74,7 +76,7 @@ func TestCompositeLetterboxed(t *testing.T) {
 
 	t.Run("exact aspect match fills the frame with no letterbox", func(t *testing.T) {
 		src := solidImage(10, 10, white)
-		frame := compositeLetterboxed(src, 10, 10)
+		frame := compositeLetterboxed(src, 10, 10, xdraw.CatmullRom)
 		for _, p := range []image.Point{{0, 0}, {9, 0}, {0, 9}, {9, 9}, {5, 5}} {
 			if r, g, b, _ := frame.At(p.X, p.Y).RGBA(); r == 0 && g == 0 && b == 0 {
 				t.Errorf("corner/center pixel %v = %v, want white (no letterbox)", p, frame.At(p.X, p.Y))

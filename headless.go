@@ -6,6 +6,8 @@ import (
 	"image/png"
 	"log"
 	"os"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 // headlessOutputPath is where HeadlessRenderer dumps each composited frame
@@ -40,7 +42,9 @@ func NewHeadlessRenderer() (*HeadlessRenderer, int, int) {
 func (h *HeadlessRenderer) Present(frame *image.RGBA) error {
 	src := image.Image(frame)
 	if frame == nil {
-		src = compositeLetterboxed(nil, headlessWidth, headlessHeight)
+		// Scaler is unused when img is nil; CatmullRom for consistency
+		// with the other call sites.
+		src = compositeLetterboxed(nil, headlessWidth, headlessHeight, xdraw.CatmullRom)
 	}
 
 	f, err := os.Create(h.path)

@@ -1,8 +1,8 @@
 {
   "feature": "drm-renderer",
-  "status": "in-progress",
-  "current_step": 32,
-  "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+  "status": "complete",
+  "current_step": 33,
+  "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33],
   "errors": [],
-  "notes": "All-software steps (1-31) complete. Whole package builds, vets, and passes `go test -race` clean; binary links (~4.5MB) for the first time on this NixOS dev box, which could never link the old Fyne/CGo/X11 build. Steps 32-33 (Hardware Validation) require the physical pi3b.local board and are explicitly gated per Analyst.md's carried prerequisite: Step 32 requires confirming a board-recovery plan (spare SD card / serial console / restored remote access) BEFORE any on-hardware DRM test, since a bug can leave the board running but unreachable, with no console. Stopped here pending that confirmation from the user rather than proceeding onto real hardware unsupervised."
+  "notes": "All 33 planned steps complete and validated on real hardware (pi3b.local). After Step 33, a spontaneous post-deployment investigation (recorded at the end of tasks.md) found real keypress latency was bad against production content, root-caused via on-hardware CPU profiling to compositeLetterboxed's synchronous CatmullRom upscale of the instant-nav thumbnail (~73% of CPU time, ~1/3 of it this one call). Fixed by making compositeLetterboxed take a scaler parameter: NearestNeighbor for the instant-thumbnail path, CatmullRom retained for the background-decoded full-resolution path. Controlled benchmarks (bench_test.go, kept) confirmed a real ~4.1x win (466ms->113ms/op) and that thumb_width has no meaningful effect on that cost (110-119ms flat across a 12x range, 40-480px) -- informing but not yet deciding the user's separate full-resolution-image-caching idea, which would trade the remaining ~113ms floor for further RSS growth on top of the already-missed 190-200MB baseline. User confirmed the deployed fix felt much better and declined further optimization (a suggested hand-written interface-free NearestNeighbor blit) for now. All board test artifacts cleaned up; one current binary (with the fix) left running against the user's real content at ~jassg/mural/mural."
 }
