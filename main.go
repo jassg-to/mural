@@ -86,6 +86,24 @@ func main() {
 			os.Exit(1)
 		}
 		vt.HandleShutdownSignals(ctx, cancel)
+
+		// Not fatal: mural still owns DRM master and drives the display
+		// either way. Without this the console keeps rendering kernel
+		// messages underneath/behind mural's own frames, visible the
+		// moment the console reappears at exit; RestoreConsole is what
+		// undoes it. (Measured on hardware: this alone does not stop
+		// keystroke echo — see DisableEcho below for that.)
+		if err := vt.EnterGraphicsMode(); err != nil {
+			log.Printf("entering console graphics mode: %v", err)
+		}
+
+		// Not fatal, same reasoning as above: this is what actually stops
+		// physical keystrokes from being drawn on the console live while
+		// mural runs (see DisableEcho's doc comment) — mural still works
+		// without it, just with the visual bug this whole fix targets.
+		if err := vt.DisableEcho(); err != nil {
+			log.Printf("disabling console tty echo: %v", err)
+		}
 	}
 
 	inputWatcher, err := NewInputWatcher(ctx)

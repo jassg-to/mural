@@ -22,8 +22,9 @@ const (
 	vtModeProcess = 1
 	vtAckAcq      = 2
 
-	kdSetMode = 0x4B3A
-	kdText    = 0x00
+	kdSetMode  = 0x4B3A
+	kdText     = 0x00
+	kdGraphics = 0x01
 )
 
 // vtMode mirrors struct vt_mode.
@@ -47,7 +48,8 @@ const (
 // VT owns the process's controlling terminal, which VT-switch and
 // console-mode ioctls act on.
 type VT struct {
-	f *os.File
+	f           *os.File
+	origTermios *unix.Termios
 }
 
 // OpenVT opens the process's controlling terminal.
@@ -57,6 +59,52 @@ func OpenVT() (*VT, error) {
 		return nil, fmt.Errorf("opening controlling tty: %w", err)
 	}
 	return &VT{f: f}, nil
+}
+
+// EnterGraphicsMode sets the controlling tty to KD_GRAPHICS, the
+// belt-and-braces counterpart to RestoreConsole's KD_TEXT and the fix for
+// EvalReport.md finding F7: while a VT is in KD_GRAPHICS, the console's own
+// text rendering (fbcon) stops drawing to the screen, which is what keeps a
+// stray kernel log message from appearing over mural's own frames.
+//
+// Measured on pi3b.local hardware: this does NOT, by itself, stop the
+// buffered-keystroke echo bug — injecting a keypress while KD_GRAPHICS is
+// active still updates the console's live character grid (verified via
+// /dev/vcs1), so something downstream still redraws it visibly once the
+// console reappears. That echo turned out to be the tty line discipline's
+// own ECHO, independent of KD_GRAPHICS — see DisableEcho, which is the
+// actual fix for that bug. Call this once mural has taken over the
+// display; RestoreConsole undoes it on the way out.
+func (v *VT) EnterGraphicsMode() error {
+	if err := ioctlInt(int(v.f.Fd()), kdSetMode, kdGraphics); err != nil {
+		return fmt.Errorf("KDSETMODE(KD_GRAPHICS): %w", err)
+	}
+	return nil
+}
+
+// DisableEcho saves the controlling tty's current termios and clears ECHO
+// and ICANON. A tty a shell just handed to a new foreground process (mural,
+// here) starts in normal cooked mode — ECHO on, ICANON on — so the kernel's
+// line discipline echoes every physical keystroke back to the console the
+// instant it arrives, regardless of whether anything is reading it. Mural
+// never reads from this tty itself (input.go reads /dev/input/eventN
+// directly), so turning ECHO off here has no effect on mural's own key
+// handling — it only stops the console from drawing keystrokes mural was
+// never going to read anyway. Must be paired with RestoreConsole, which
+// restores the saved termios alongside its existing work.
+func (v *VT) DisableEcho() error {
+	orig, err := unix.IoctlGetTermios(int(v.f.Fd()), unix.TCGETS)
+	if err != nil {
+		return fmt.Errorf("TCGETS: %w", err)
+	}
+	v.origTermios = orig
+
+	raw := *orig
+	raw.Lflag &^= unix.ECHO | unix.ICANON
+	if err := unix.IoctlSetTermios(int(v.f.Fd()), unix.TCSETS, &raw); err != nil {
+		return fmt.Errorf("TCSETS (disabling echo): %w", err)
+	}
+	return nil
 }
 
 // ioctlInt issues an ioctl whose argument is a plain integer value rather
@@ -157,7 +205,26 @@ func (v *VT) HandleShutdownSignals(ctx context.Context, cancel context.CancelFun
 // text console behind. Called on the graceful shutdown path only —
 // SIGKILL cannot be handled, and relies on the kernel's own fd-close
 // teardown instead (see Architect.md).
+//
+// It also undoes DisableEcho (restoring the tty's original termios, so the
+// shell gets back a normal cooked/echoing terminal) and discards any input
+// still queued on the tty (TCFLUSH/TCIFLUSH). The termios restore is what
+// stops keystrokes from being drawn on screen at all as mural runs; the
+// flush is a second, independent safety net — mural reads keys directly
+// from /dev/input/eventN (input.go), bypassing the tty entirely, but
+// anything that reached the tty's read queue before DisableEcho took
+// effect (or during a brief window some other way) would otherwise still
+// be sitting there and get delivered to the shell the moment it regains
+// the foreground tty right after this call.
 func (v *VT) RestoreConsole() error {
+	if v.origTermios != nil {
+		if err := unix.IoctlSetTermios(int(v.f.Fd()), unix.TCSETS, v.origTermios); err != nil {
+			log.Printf("TCSETS: restoring original tty termios: %v", err)
+		}
+	}
+	if err := unix.IoctlSetInt(int(v.f.Fd()), unix.TCFLSH, unix.TCIFLUSH); err != nil {
+		log.Printf("TCFLSH(TCIFLUSH): discarding buffered tty input: %v", err)
+	}
 	if err := ioctlInt(int(v.f.Fd()), kdSetMode, kdText); err != nil {
 		return fmt.Errorf("KDSETMODE(KD_TEXT): %w", err)
 	}
