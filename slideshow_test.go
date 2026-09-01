@@ -360,6 +360,162 @@ func TestScanSlidesImages(t *testing.T) {
 	})
 }
 
+// TestScanSlidePaths covers the fast path Run() now uses at startup: it
+// must discover every image (corrupt ones included, exactly like
+// scanSlides) but decode no thumbnails at all, regardless of thumb_width —
+// scanSlidePaths doesn't even take one as a parameter.
+func TestScanSlidePaths(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPNG(t, filepath.Join(dir, "a.png"), 10, 10)
+	writeTestPNG(t, filepath.Join(dir, "b.png"), 12, 12)
+	if err := os.WriteFile(filepath.Join(dir, "corrupt.png"), []byte("not a real png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ignored.txt"), []byte("ignore me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	slides, err := scanSlidePaths(dir)
+	if err != nil {
+		t.Fatalf("scanSlidePaths: %v", err)
+	}
+	if len(slides) != 3 {
+		t.Fatalf("got %d slides, want 3 (a.png, b.png, corrupt.png)", len(slides))
+	}
+	for _, sl := range slides {
+		if sl.thumb != nil {
+			t.Errorf("slide %s has a non-nil thumbnail, want scanSlidePaths to decode none", sl.path)
+		}
+		if sl.size == 0 {
+			t.Errorf("slide %s has size 0, want the real file size populated", sl.path)
+		}
+		if sl.mtime.IsZero() {
+			t.Errorf("slide %s has a zero mtime, want the real file mtime populated", sl.path)
+		}
+	}
+}
+
+// TestApplyLoadedThumbs covers startThumbnailLoad's merge semantics: a
+// thumbnail is applied only to a slide that (a) still has no thumbnail and
+// (b) still matches the loaded result's path/size/mtime — the guard
+// against a Reload or ingest having replaced s.slides while the background
+// load was in flight.
+func TestApplyLoadedThumbs(t *testing.T) {
+	mtime := time.Now()
+	existingThumb := solidImage(1, 1, color.RGBA{R: 1, A: 255})
+	newThumb := solidImage(8, 8, color.RGBA{R: 2, A: 255})
+
+	s, _ := newHeadlessSlideshow([]Slide{
+		{path: "a.png", size: 100, mtime: mtime},                       // should get a.png's loaded thumb
+		{path: "b.png", thumb: existingThumb, size: 100, mtime: mtime}, // already has a thumb: must not be overwritten
+		{path: "c.png", size: 999, mtime: mtime},                       // size mismatch vs loaded: must be skipped
+		{path: "gone.png", size: 100, mtime: mtime},                    // not present in loaded results at all
+	}, time.Hour)
+
+	s.applyLoadedThumbs([]Slide{
+		{path: "a.png", thumb: newThumb, size: 100, mtime: mtime},
+		{path: "b.png", thumb: newThumb, size: 100, mtime: mtime},
+		{path: "c.png", thumb: newThumb, size: 100, mtime: mtime}, // loaded metadata no longer matches current c.png
+	})
+
+	if s.slides[0].thumb != newThumb {
+		t.Error("a.png did not get its loaded thumbnail applied")
+	}
+	if s.slides[1].thumb != existingThumb {
+		t.Error("b.png's existing thumbnail was overwritten, want it left alone")
+	}
+	if s.slides[2].thumb != nil {
+		t.Error("c.png got a thumbnail applied despite a size mismatch, want it skipped")
+	}
+	if s.slides[3].thumb != nil {
+		t.Error("gone.png got a thumbnail applied despite no matching loaded result")
+	}
+}
+
+// TestStartThumbnailLoad drives startThumbnailLoad end-to-end against a
+// real temp directory: it must decode a thumbnail for every current slide
+// and post exactly one thumbsLoadedMsg into cmdCh, which handleCommand
+// then applies.
+func TestStartThumbnailLoad(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPNG(t, filepath.Join(dir, "a.png"), 10, 10)
+	writeTestPNG(t, filepath.Join(dir, "b.png"), 12, 12)
+
+	slides, err := scanSlidePaths(dir)
+	if err != nil || len(slides) != 2 {
+		t.Fatalf("scanSlidePaths: err=%v, %d slides", err, len(slides))
+	}
+
+	s, _ := newHeadlessSlideshow(slides, time.Hour)
+	s.thumbWidth = 8
+
+	s.startThumbnailLoad()
+	msg := drainAndHandle(t, s)
+	if _, ok := msg.(thumbsLoadedMsg); !ok {
+		t.Fatalf("got %T, want thumbsLoadedMsg", msg)
+	}
+
+	for _, sl := range s.slides {
+		if sl.thumb == nil {
+			t.Errorf("slide %s has no thumbnail after startThumbnailLoad, want one decoded", sl.path)
+			continue
+		}
+		if got := sl.thumb.Bounds().Dx(); got != 8 {
+			t.Errorf("slide %s thumbnail width = %d, want 8", sl.path, got)
+		}
+	}
+}
+
+// TestRunPresentsFirstSlideWithoutThumbnailFlash is the end-to-end
+// regression test for this change's headline goal: Run()'s very first
+// Present call must already be the fully decoded slide 0 — not a
+// thumbnail, and not a black placeholder frame — because the startup scan
+// no longer decodes any thumbnails before show(0, false) runs.
+func TestRunPresentsFirstSlideWithoutThumbnailFlash(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPNG(t, filepath.Join(dir, "a.png"), 10, 10)
+	writeTestPNG(t, filepath.Join(dir, "b.png"), 10, 10)
+
+	fr := &fakeRenderer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Slideshow{
+		dir:        dir,
+		interval:   time.Hour,
+		thumbWidth: 8,
+		renderer:   fr,
+		width:      64,
+		height:     64,
+		cmdCh:      make(chan any, 8),
+		ctx:        ctx,
+		cec:        NewCEC(),
+	}
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- s.Run(cancel, nil, nil, nil) }()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if frame, ok := fr.lastPresent(); ok {
+			if frame == nil {
+				t.Fatal("first Present call was a blank/black frame, want the decoded slide 0 straight away")
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("Run never called Present within 2s")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	select {
+	case <-runErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of cancellation")
+	}
+}
+
 // fakeRenderer is a Renderer test double: it records every Present call's
 // frame (a nil entry records a Present(nil) blank call) and whether Close
 // was called. Safe for concurrent use, though in practice these tests only

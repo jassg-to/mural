@@ -71,24 +71,18 @@ func loadThumbnail(path string, width uint) image.Image {
 	return dst
 }
 
-// scanSlides scans dir for images and returns a []Slide. existing slides
-// whose path, size, and mtime are unchanged are reused as-is, without
-// re-decoding a thumbnail.
-//
-// existing is a snapshot passed in by the caller and never mutated in
-// place: scanSlides runs from Run() on the run-loop goroutine and from a
-// reload's background goroutine, so a shared mutable map would be a
-// concurrent map write — an unrecoverable Go runtime fatal, not a benign
-// race.
-func (s *Slideshow) scanSlides(existing []Slide, thumbWidth uint) ([]Slide, error) {
-	entries, err := os.ReadDir(s.dir)
+// scanSlidePaths scans dir for images and returns a []Slide with no
+// thumbnail decoded for any of them (thumb is always nil) — just the
+// path/size/mtime identity a thumbnail or full decode is later keyed on.
+// This is the fast path Run() uses at startup: discovering the file list
+// this way, instead of through scanSlides, is what lets the first slide
+// reach the screen without waiting for every other image in the directory
+// to be thumbnail-decoded first. See startThumbnailLoad for how thumbnails
+// get filled in afterward.
+func scanSlidePaths(dir string) ([]Slide, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading content directory: %w", err)
-	}
-
-	prev := make(map[string]Slide, len(existing))
-	for _, sl := range existing {
-		prev[sl.path] = sl
 	}
 
 	var slides []Slide
@@ -100,27 +94,61 @@ func (s *Slideshow) scanSlides(existing []Slide, thumbWidth uint) ([]Slide, erro
 		if !isImageExt(ext) {
 			continue
 		}
-		path := filepath.Join(s.dir, e.Name())
 		fi, err := e.Info()
 		if err != nil {
 			continue
 		}
-		size, mtime := fi.Size(), fi.ModTime()
+		slides = append(slides, Slide{
+			path:  filepath.Join(dir, e.Name()),
+			size:  fi.Size(),
+			mtime: fi.ModTime(),
+		})
+	}
+	return slides, nil
+}
 
-		if old, ok := prev[path]; ok && old.size == size && old.mtime.Equal(mtime) {
-			slides = append(slides, old)
+// scanSlides scans dir for images and returns a []Slide, with thumbnails
+// decoded eagerly for every slide. existing slides whose path, size, and
+// mtime are unchanged are reused as-is, without re-decoding a thumbnail.
+//
+// existing is a snapshot passed in by the caller and never mutated in
+// place: scanSlides runs from Run() on the run-loop goroutine and from a
+// reload's background goroutine, so a shared mutable map would be a
+// concurrent map write — an unrecoverable Go runtime fatal, not a benign
+// race.
+//
+// Used by Reload/ingest, where eagerly-decoded thumbnails are worth the
+// wait since nothing is waiting on a first frame the way startup is;
+// Run()'s own startup scan uses the cheaper scanSlidePaths instead.
+func (s *Slideshow) scanSlides(existing []Slide, thumbWidth uint) ([]Slide, error) {
+	bare, err := scanSlidePaths(s.dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(bare) == 0 {
+		return nil, nil
+	}
+
+	prev := make(map[string]Slide, len(existing))
+	for _, sl := range existing {
+		prev[sl.path] = sl
+	}
+
+	slides := make([]Slide, len(bare))
+	for i, b := range bare {
+		if old, ok := prev[b.path]; ok && old.size == b.size && old.mtime.Equal(b.mtime) {
+			slides[i] = old
 			continue
 		}
-
 		// A corrupt image is still included in the rotation with a nil
 		// thumbnail rather than being excluded (loadThumbnail returns nil
 		// silently on decode failure).
-		slides = append(slides, Slide{
-			path:  path,
-			thumb: loadThumbnail(path, thumbWidth),
-			size:  size,
-			mtime: mtime,
-		})
+		slides[i] = Slide{
+			path:  b.path,
+			thumb: loadThumbnail(b.path, thumbWidth),
+			size:  b.size,
+			mtime: b.mtime,
+		}
 	}
 	return slides, nil
 }
@@ -182,6 +210,9 @@ type ingestCommitMsg struct{}
 type ingestResultMsg struct {
 	mountPoint string
 	result     ingestResult
+}
+type thumbsLoadedMsg struct {
+	slides []Slide
 }
 
 // Slideshow loads images from dir and displays them as a fullscreen
@@ -333,6 +364,66 @@ func (s *Slideshow) startRescan(wake, freshThumbs bool) {
 		case <-s.ctx.Done():
 		}
 	}()
+}
+
+// startThumbnailLoad decodes a thumbnail for every slide in a snapshot of
+// s.slides on a background goroutine, then posts the results back into
+// cmdCh. Must be called from the run-loop goroutine (it reads s.slides and
+// s.thumbWidth directly).
+//
+// This exists only for Run()'s startup scan, which deliberately discovers
+// slides via the thumbnail-free scanSlidePaths so the first slide can be
+// decoded and presented without waiting on every other image in the
+// directory first (see Run()'s doc comment). It runs exactly once, right
+// after that startup scan; a later Reload or media ingest already gets
+// eagerly-decoded thumbnails from scanSlides itself and has no need to call
+// this again.
+func (s *Slideshow) startThumbnailLoad() {
+	if len(s.slides) == 0 {
+		return
+	}
+	snapshot := make([]Slide, len(s.slides))
+	copy(snapshot, s.slides)
+	thumbWidth := s.thumbWidth
+
+	go func() {
+		for i := range snapshot {
+			snapshot[i].thumb = loadThumbnail(snapshot[i].path, thumbWidth)
+		}
+		select {
+		case s.cmdCh <- thumbsLoadedMsg{slides: snapshot}:
+		case <-s.ctx.Done():
+		}
+	}()
+}
+
+// applyLoadedThumbs merges background-loaded thumbnails from
+// startThumbnailLoad into s.slides. Must be called from the run-loop
+// goroutine.
+//
+// Matching is by path/size/mtime rather than by index or a captured
+// generation counter: if a Reload or media ingest replaced s.slides with a
+// wholly different (or reordered, or resized) set while the background
+// load was still running, a stale entry simply fails to match and is
+// dropped silently — the replacement slide list already got its own
+// correctly-decoded thumbnails from scanSlides. A slide that already
+// acquired a thumbnail by some other means (e.g. the user navigated to it
+// and it went through a full decode, though that path does not itself set
+// thumb) is left untouched rather than overwritten, though in practice
+// thumb is only ever set here or by scanSlides.
+func (s *Slideshow) applyLoadedThumbs(loaded []Slide) {
+	byPath := make(map[string]Slide, len(loaded))
+	for _, sl := range loaded {
+		byPath[sl.path] = sl
+	}
+	for i, cur := range s.slides {
+		if cur.thumb != nil {
+			continue
+		}
+		if sl, ok := byPath[cur.path]; ok && sl.size == cur.size && sl.mtime.Equal(cur.mtime) {
+			s.slides[i].thumb = sl.thumb
+		}
+	}
 }
 
 // slideshowDefaults applies the zero-value defaults for slideshow
@@ -646,6 +737,8 @@ func (s *Slideshow) handleCommand(msg any) {
 		}
 	case ingestResultMsg:
 		s.handleIngestResult(m)
+	case thumbsLoadedMsg:
+		s.applyLoadedThumbs(m.slides)
 	}
 }
 
@@ -666,8 +759,24 @@ func (s *Slideshow) handleVTEvent(ev vtEvent) {
 // may be nil when USB hotplug detection is disabled or unsupported) and are
 // read directly in the run loop's select — a nil channel there simply never
 // fires.
+//
+// Startup is deliberately two-phase for perceived performance: the initial
+// scan (scanSlidePaths) only discovers file paths/size/mtime, decoding no
+// thumbnails, so it stays fast regardless of how many images are in dir.
+// show(0, false) then decodes and presents slide 0 at full resolution as
+// soon as that one decode finishes — no thumbnail flash, since slide 0 has
+// no thumbnail yet to flash. Thumbnails for every slide (including slide
+// 0) are then generated in the background by startThumbnailLoad and merged
+// into s.slides via cmdCh once ready, so instant-nav (NavLeft/Right/Home)
+// keeps working exactly as before once that finishes. Navigating to a
+// slide before its thumbnail has loaded falls back to compositeLetterboxed's
+// existing nil-image handling — the same solid-black placeholder a corrupt
+// image gets — until that slide's own full decode (kicked off by the same
+// show() call) lands a moment later; this was chosen over inventing a new
+// placeholder state because it reuses an already-correct, already-tested
+// code path instead of adding one.
 func (s *Slideshow) Run(cancel context.CancelFunc, navEvents <-chan NavKey, vtEvents <-chan vtEvent, mediaEvents <-chan string) error {
-	slides, err := s.scanSlides(nil, s.thumbWidth)
+	slides, err := scanSlidePaths(s.dir)
 	if err != nil {
 		return err
 	}
@@ -683,13 +792,19 @@ func (s *Slideshow) Run(cancel context.CancelFunc, navEvents <-chan NavKey, vtEv
 	if s.startPaused {
 		s.pause()
 	} else {
-		s.show(0, true)
+		// instant=false, not true: slide 0 has no thumbnail yet (the
+		// startup scan above never decodes one), so presenting "instantly"
+		// here would only present a pointless black flash before the same
+		// full decode lands a moment later. Skipping straight to the full
+		// decode reaches real content just as fast, with no flash.
+		s.show(0, false)
 		go func() {
 			if err := s.cec.TurnOn(); err != nil {
 				log.Printf("CEC TurnOn (startup): %v", err)
 			}
 		}()
 	}
+	s.startThumbnailLoad()
 
 	for {
 		select {

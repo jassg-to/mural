@@ -2,7 +2,11 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
 
 	xdraw "golang.org/x/image/draw"
@@ -22,6 +26,58 @@ func BenchmarkCompositeLetterboxedNN(b *testing.B) {
 			}
 		})
 	}
+}
+
+// writeBenchPNG writes a w×h solid-color PNG to path, for benchmarks that
+// need real files on disk (image.Decode requires a real codec-readable
+// source) but can't use writeTestPNG from slideshow_test.go, which takes a
+// *testing.T rather than a *testing.B.
+func writeBenchPNG(b *testing.B, path string, w, h int) {
+	b.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	f, err := os.Create(path)
+	if err != nil {
+		b.Fatalf("creating %s: %v", path, err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		b.Fatalf("encoding %s: %v", path, err)
+	}
+}
+
+// BenchmarkStartupScan is the regression guard for this change's whole
+// premise: scanSlidePaths (the fast path Run() now uses at startup) must
+// stay far cheaper than scanSlides (which eagerly decodes every
+// thumbnail) as the directory's slide count and resolution grow — that
+// gap is what lets the first slide reach the screen quickly regardless of
+// how many other images are alongside it. 12 images at 1920x1080
+// approximates the real content directory this fix was written for
+// (docs/kit.jpg-class content, a dozen full-HD PNGs).
+func BenchmarkStartupScan(b *testing.B) {
+	dir := b.TempDir()
+	const n = 12
+	for i := 0; i < n; i++ {
+		writeBenchPNG(b, filepath.Join(dir, fmt.Sprintf("%02d.png", i)), 1920, 1080)
+	}
+
+	b.Run("scanSlidePaths(fast_path)", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := scanSlidePaths(dir); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("scanSlides(decodes_every_thumbnail)", func(b *testing.B) {
+		s := &Slideshow{dir: dir, thumbWidth: 80}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := s.scanSlides(nil, 80); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 // BenchmarkCompositeLetterboxedScaler compares the three candidate scalers
