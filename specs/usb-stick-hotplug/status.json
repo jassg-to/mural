@@ -1,9 +1,9 @@
 {
   "feature": "usb-stick-hotplug",
-  "status": "in-progress",
-  "current_step": 33,
-  "total_steps": 38,
-  "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, "19b", 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, "29b", 30, 31, 32, "32b", "32c"],
+  "status": "complete",
+  "current_step": 34,
+  "total_steps": 34,
+  "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, "19b", 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, "29b", 30, 31, 32, "32b", "32c", 33, 34],
   "errors": [],
-  "notes": "All code, tests, docs, and whole-tree validation complete (Steps 1-32c). gofmt clean, go vet clean, staticcheck clean (one pre-existing unrelated finding in untouched drm_ioctl.go), go test + go test -race clean, cross-compiles clean for amd64/arm64/armv7. Only hardware validation remains: Step 33 (gate: confirm pi3b.local is recoverable and the installer change can be applied) and Step 34 (real USB stick validation on the board, 10 sub-scenarios incl. an hour-long EINTR/watcher-survival check). These require physical interaction (plugging/unplugging a real USB stick, observing the physical display) per CLAUDE.local.md — will need Liz's help for the physical parts."
+  "notes": "COMPLETE. All 34 steps done, including hardware validation on pi3b.local. Step 34(j) soak test confirmed: mural ran ~7.5 hours unattended, then a final stick insertion was ingested correctly by the same still-running process (PID 842, no restart) — watcher goroutine survives long runs, no EINTR death. Final whole-tree checks re-run clean: go build, go vet, go test -race ./... all pass.\n\nReal hardware finding (fixed, documented in install.sh/Architect.md/CriticReview.md/tasks.md): the udev rule's ATTRS{removable}==\"1\" USB-boot guard (CriticReview.md Round 2 F11) was structurally unmatchable on any hardware and has been removed entirely.\n\nPi state as left: mural running on pi3b.local against /home/jassg/mural/content (the safe test directory — /home/jassg/content is Liz's real production content, briefly and accidentally overwritten mid-testing, fully restored and confirmed byte-identical). udev rule + /media/mural in place on the live Pi. No systemd auto-launch configured; mural must be relaunched manually if the board reboots.\n\nNext: archive this spec directory and hand off to Liz for the commit."
 }

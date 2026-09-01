@@ -518,6 +518,29 @@ This is a prerequisite, not a nicety: without it a stick on a stock deployment
 appears as a block device and is never mounted, so the feature is inert. Every
 pre-existing installation needs `install.sh` re-run, and that goes in the docs.
 
+**Hardware-validation correction — the `ATTRS{removable}=="1"` USB-boot guard
+(added by the Critic's Round 2 F11) does not work, and cannot ever work.**
+Step 34 validation on `pi3b.local` found the udev rule never matched the test
+stick at all. `udevadm info -a` traced the cause: udev requires
+`SUBSYSTEMS=="usb"` and an `ATTRS{}` match to be satisfied by the *same*
+ancestor device in the walk-up chain, but `removable` is two unrelated
+attributes wearing one name — the block-layer disk device (subsystem
+`block`) has a numeric `0`/`1` flag, while the actual `usb`-subsystem
+ancestor has its own string attribute (`"fixed"`/`"removable"`/`"unknown"`),
+and the test stick's mass-storage bridge chip reported `"fixed"` there
+regardless of being genuinely removable flash media. No ancestor can ever
+satisfy both conditions simultaneously, so the guard doesn't narrow the
+rule to exclude USB-boot devices — it makes the rule **unmatchable by any
+USB stick, structurally, on any hardware**, which is a far worse failure
+than the one it was added to prevent. The guard is removed; `install.sh`'s
+udev rule now matches on `SUBSYSTEM`/`SUBSYSTEMS`/`ID_FS_USAGE`/`ID_FS_TYPE`
+only. The USB-boot double-mount risk this guard was meant to close is
+retained as a documented, accepted limitation of the SD-card-only
+deployment target, not silently reintroduced — see Risks below. This is the
+headline argument for why Step 34 exists at all: a plausible-looking,
+critic-reviewed udev condition that reads as correct rule text and is
+provably, structurally wrong the moment it meets real hardware.
+
 ## Package Contracts
 
 | Contract | Shape | Defined in | Consumed by |
@@ -777,6 +800,12 @@ introduced**.
   underestimates actual consumption (block rounding, directory entries), which
   the 32 MiB margin is meant to absorb. A stick of ten thousand tiny files would
   defeat that assumption; nothing in the spec suggests that is a real workload.
+- **A USB-boot Pi's root filesystem is not excluded from the automount rule,
+  confirmed as unfixable in-rule.** The `ATTRS{removable}=="1"` guard this plan
+  originally specified cannot work on any hardware (see the hardware-validation
+  correction above) and has been removed outright. `docs/INSTALL.md`'s only
+  supported deployment boots from the SD card, so this is accepted as a
+  residual risk of an unsupported configuration rather than solved.
 
 ## Architect Checklist
 
