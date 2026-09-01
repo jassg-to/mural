@@ -3,6 +3,13 @@
 > Specification delta — what changes relative to the current system.
 > Only exists when this feature modifies existing behaviour.
 
+> **Currency:** this delta was first written against the pre-DRM codebase (Fyne
+> renderer, `SetOnTypedKey` input). The DRM/KMS + evdev migration landed the
+> following day. Every code reference below has been re-anchored to the current
+> HEAD, and every claim re-verified against it. No substantive statement changed:
+> the fusion in `Reload`, the discarded `[slideshow]` section, the fatal empty
+> content directory, and the Samba co-writer all still hold exactly as described.
+
 ## ADDED
 
 - Removable volumes becoming available at runtime are detected while the player
@@ -47,13 +54,14 @@
   directory, so two independent writers now exist where there was one.
 
 - **The content directory is a flat set of images, with subdirectories skipped
-  and otherwise meaningless** (`scanSlides`, slideshow.go:66-69) → **the content
+  and otherwise meaningless** (`scanSlides`, slideshow.go:94-98) → **the content
   directory gains internal structure**, because displaced content must remain on
   the device while staying out of the rotation.
 
 - **The display is turned on only by the schedule or by explicit keyboard input**
   (`Schedule.onTurnOn` → `ss.Reload` → `resume`, and the nav-key wake in
-  `SetOnTypedKey`) → **device insertion also turns the display on**, including
+  `handleNavKey`, slideshow.go:377-389) → **device insertion also turns the
+  display on**, including
   outside scheduled on-hours.
 
   *This is an intentional exception to schedule authority, chosen deliberately:
@@ -65,7 +73,8 @@
   event, with no new timeout mechanism introduced.*
 
 - **`Reload` fuses "rescan content" with "un-pause and power on the display"**
-  (slideshow.go:183-206, where `Reload` unconditionally ends in `resume()`) →
+  (`Reload`, slideshow.go:275-277, posts a request whose result handler at
+  slideshow.go:409-420 unconditionally ends in `resume()`) →
   **the two concerns are separable, even though the hotplug path uses both.**
   The fusion is currently invisible because the only callers are scheduled
   turn-on and the Home key, both of which want both effects. Ingest also wants
@@ -75,7 +84,7 @@
   or ignored volume must not wake the display, and today any code path that
   rescans necessarily does.
 
-- **Slideshow settings are read once at startup and never re-read** (`main.go:27-34`
+- **Slideshow settings are read once at startup and never re-read** (`main.go:32-40`
   applies `cfg.Slideshow.Interval` and `cfg.Slideshow.ThumbWidth` at construction;
   `Schedule.reload`, schedule.go:183-193, assigns only `cfg.Schedule` and discards
   the `[slideshow]` section entirely) → **slideshow settings apply live when a
@@ -92,18 +101,24 @@
   Live application of slideshow settings moves from an occasional path to the
   main one, and cannot be deferred or treated as a rare case.*
 
-- **An empty content directory is a fatal startup error** (`Run`, slideshow.go:243-245,
+- **An empty content directory is a fatal startup error** (`Run`, slideshow.go:452-459,
   returns `no images found in %s`, which `main.go` reports and exits 1) → **an
   empty content directory is a valid state in which the player waits for content.**
 
   *This follows directly from the feature: if a USB stick is a provisioning
   mechanism, then "deploy the sign, boot it, walk up and hand it content" is a
   supported journey, and it is impossible while an empty directory kills the
-  process before any volume can be seen. Flagged explicitly at the gate as the
-  one delta that was not among the confirmed answers — it is a consequence of
-  them rather than a decision that was put to the user, and it can be cut, at the
-  cost of requiring at least one image to be present before a stick will ever be
-  read.*
+  process before any volume can be seen. Flagged at the gate as the one delta
+  that was not among the original confirmed answers — a consequence of them
+  rather than a decision that had been put to the user — and **explicitly
+  confirmed there.** The alternative (requiring at least one pre-loaded image
+  before a stick would ever be read) was considered and declined.*
+
+  *Note the knock-on: the waiting state is now reachable at runtime as well as at
+  startup, so "no images" stops being an error condition anywhere in the player
+  and becomes an ordinary state. `Run`'s startup check is the obvious site; the
+  reload path at slideshow.go:414-417 already treats an empty rescan as a
+  non-fatal no-op and is consistent with this.*
 
 ## REMOVED
 

@@ -75,6 +75,18 @@ last = [ "18:00-22:00" ]  # extra hours on the last Saturday of the month
 - The config file is re-read from disk daily at `reload_time` — edit it without restarting.
 - At each turn-on event, the content directory is rescanned for new or changed images.
 
+## USB Stick Content Updates
+
+On Linux (e.g. the Pi), plugging in a USB stick updates the sign's content without a restart, a network connection, or shell access:
+
+- The stick must carry a `config.toml` at its top level, or it is ignored entirely — this is the marker that tells Mural the stick is meant for it, so a random flash drive, camera card, or phone doesn't silently replace the sign's content.
+- If accepted, the stick's images are copied into the content directory and become the entire rotation; its `config.toml` is adopted as the running schedule and slideshow settings, live. The display wakes immediately as visual confirmation, even outside scheduled hours.
+- The images and config the stick replaces are kept, not deleted, in `content/previous/` — the single most recently displaced set, overwritten by the next accepted stick with images.
+- The stick is never written to, and can be removed once the sign has picked up the new content; it keeps playing indefinitely, including across reboots.
+- A stick with only a `config.toml` and no images updates settings without touching the current rotation.
+
+Mount detection reads `-media-dir` (default `/media/mural`) via `/proc/self/mountinfo`; Mural itself never mounts anything — `install.sh` sets up a udev rule that automounts USB volumes read-only under this path. An empty `-media-dir` disables the feature. See [docs/INSTALL.md](docs/INSTALL.md#update-content-by-usb-stick) for the full workflow, recovery steps, and the security note on physical USB port access.
+
 ## How It Works
 
 - Images are loaded from the content directory in filename order. Only changed files are re-decoded on reload.

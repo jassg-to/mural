@@ -8,8 +8,9 @@
 
 Mural runs as an unattended kiosk on a Raspberry Pi. Today, updating the content
 on a running sign requires either a network path (the optional Samba share) or
-shell access (SSH / `startx` restart). Both assume the operator is technical and
-that the Pi is reachable on a network that the operator can join.
+shell access (SSH, plus a restart of the kiosk process). Both assume the operator
+is technical and that the Pi is reachable on a network that the operator can
+join.
 
 The people who actually maintain these signs often are neither. The intended
 interaction is physical and requires no knowledge of the machine: **walk up to
@@ -46,6 +47,8 @@ currently impossible without physically removing the SD card.
   restart.
 - Waking the display on insertion so the operator gets immediate confirmation
   that the stick was accepted, even outside scheduled on-hours.
+- Allowing the player to start and keep running with no content at all, so a
+  freshly deployed sign can be provisioned entirely by handing it a stick.
 - Changes to the installer and install documentation so that removable volumes
   are actually mounted on the target OS image, and so that operators are told a
   stick must carry a `config.toml` to be recognised (see Rules & Constraints).
@@ -120,6 +123,12 @@ currently impossible without physically removing the SD card.
   dependence on the volume being present.
 - When the system is running on a platform where removable-volume detection is
   not supported, it must start and run normally with the feature inactive.
+- When the player starts and its content directory holds no supported image, it
+  must start anyway and wait for content rather than exiting. The waiting sign
+  shows nothing, and remains able to accept a volume.
+- When a volume is accepted by a player that is waiting for content, the ingest
+  must proceed exactly as it would otherwise, and the rotation must begin from
+  the ingested images.
 
 ## Rules & Constraints
 
@@ -222,6 +231,9 @@ currently impossible without physically removing the SD card.
 | Volume mounts but is unreadable (permissions, corrupt filesystem) | Treated as an ingest failure; existing content intact; logged |
 | Stick with multiple partitions | Each mounted volume is evaluated independently as it appears, serialised per the one-at-a-time rule; each must carry its own top-level `config.toml` to be accepted |
 | Stick inserted before the player has finished starting | Handled once the player is running; a volume already mounted at startup is evaluated at startup |
+| Player started with an empty content directory | Starts and waits, showing nothing; does not exit. Remains able to accept a volume — this is the freshly-deployed-sign journey |
+| Accepted stick with images arrives while the player is waiting with no content | Ingest proceeds normally; rotation begins from the ingested images; the sign starts displaying for the first time |
+| Accepted **config-only** stick arrives while the player is waiting with no content | Config adopted and applied; rotation stays empty and the sign keeps waiting. "Never empty the rotation" is not violated — there was nothing to empty — and the sign must not be treated as failed |
 | Player restarted after an ingest | Ingested content displays; no dependence on the stick |
 | Automount not installed (pre-existing deployment) | Nothing happens on insertion; documented as requiring an installer re-run |
 | Running on Windows | Feature inactive; player otherwise unaffected |
@@ -245,7 +257,8 @@ currently impossible without physically removing the SD card.
 | Is an honoured `config.toml` copied permanently or applied transiently? | **Copied permanently**, consistent with the copy model for images. A transient config would create a split-brain in which images persist but settings revert — confusing to reason about and impossible for an operator to predict. The displaced configuration is retained recoverably like the displaced images. |
 | What if the stick's config is invalid? | **Reject the volume and abort the whole ingest**, images included. All-or-nothing is more predictable for a non-technical operator than partial application. Distinct from "ignored": a broken config means the stick *was* addressed to Mural, so it is logged as an error rather than passed over silently. |
 | Is "no `config.toml`" the same as "invalid `config.toml`"? | **No — three distinct dispositions.** No config → *ignored*, silently, not an error. Present but unusable → *rejected*, logged as an error. Present and usable → *accepted*. The first two have the same effect on the running player and differ only in intent and logging; keeping them distinct is what makes the log actionable. |
-| Does an empty or scheduleless `config.toml` count as usable? | **No — decided here, flagged for confirmation at the gate.** A `config.toml` that parses but defines no on-window anywhere is *rejected*, not accepted. Adopting one would set the sign to "never on," permanently and silently, with no on-screen explanation and no way for a non-technical operator to recover without shell access. This case is newly reachable *because* a config is now mandatory — every operator must now produce one, so a minimal or hand-typed file is a likely mistake. Chosen for consistency with the "nothing is destroyed" and "decline rather than damage" rules, but it is an inference from the requirement rather than an instruction, and can be overridden. |
+| Does an empty or scheduleless `config.toml` count as usable? | **No — confirmed at the Phase 1 review gate.** A `config.toml` that parses but defines no on-window anywhere is *rejected*, not accepted. Adopting one would set the sign to "never on," permanently and silently, with no on-screen explanation and no way for a non-technical operator to recover without shell access. This case is newly reachable *because* a config is now mandatory — every operator must now produce one, so a minimal or hand-typed file is a likely mistake. Chosen for consistency with the "nothing is destroyed" and "decline rather than damage" rules. Raised at the gate as an inference rather than an instruction, and explicitly confirmed there. |
+| Should an empty content directory remain a fatal startup error? | **No — confirmed at the Phase 1 review gate.** An empty content directory becomes a valid state in which the player runs and waits. This is a consequence of the feature rather than part of the original request, and was put to the user separately: if a stick is a provisioning mechanism, then "deploy the sign, boot it, walk up and hand it content" is a supported journey, and it is impossible while an empty directory kills the process before any volume can be seen. The alternative — requiring at least one pre-loaded image before a stick will ever be read — was considered and declined. |
 | Does a stick with no images wipe the library? | **No.** Images and configuration remain independent payloads, each applied only if present — but the *configuration* is now the required one and the *images* are optional. An accepted config-only stick changes settings and leaves the rotation exactly as it was. An accepted volume must never empty the rotation. |
 | Scope classification | **Complex** — new runtime domain (device and mount lifecycle), cross-cutting across the player, the scheduler, the installer, and the docs, with an unprivileged-process constraint. Full pipeline including `sdd-harden`. |
 

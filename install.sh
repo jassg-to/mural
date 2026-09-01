@@ -69,7 +69,66 @@ last = [ "18:00-22:00"]
 EOF
 fi
 
-# ── 4. Done ───────────────────────────────────────────────────────────────────
+# ── 4. USB stick automount (udev rule) ────────────────────────────────────────
+echo "Setting up USB stick automount..."
+
+# Raspberry Pi OS Lite ships systemd and should always have this — this
+# guards a non-Debian or minimal target, not an expected path. Warn rather
+# than silently installing a rule that can never actually mount anything:
+# that failure mode ("feature appears installed and does nothing") is
+# exactly what this whole design keeps trying to avoid.
+if ! command -v systemd-mount &>/dev/null; then
+  echo "WARNING: systemd-mount not found on this system. The USB automount rule will be installed, but it will never actually mount a stick until systemd-mount is available. USB hotplug content updates will silently do nothing." >&2
+fi
+
+# Must match mural's -media-dir default (see main.go) — the two are
+# independent literals that have to be kept in sync by hand.
+MEDIA_ROOT="/media/mural"
+sudo mkdir -p "$MEDIA_ROOT"
+sudo chmod 0755 "$MEDIA_ROOT"
+
+CURRENT_UID=$(id -u "$CURRENT_USER")
+CURRENT_GID=$(id -g "$CURRENT_USER")
+
+# uid=/gid=/umask= are FAT/exFAT/NTFS driver options, not generic VFS
+# options: ext4/btrfs/xfs reject unknown mount options and fail the mount
+# entirely, so a stick formatted with one of those would never appear in
+# /proc/self/mountinfo at all if this rule applied those options
+# unconditionally — silence, not a diagnosable failure. So those options
+# are confined to their own rule, keyed on ID_FS_TYPE; the other rule
+# carries only the four options that are safe on every filesystem.
+#
+# A USB-boot Pi mounting its own root filesystem a second time under this
+# directory was meant to be excluded by ATTRS{removable}=="1" — dropped
+# after on-hardware testing showed it can never work. udev requires
+# SUBSYSTEMS=="usb" and an ATTRS{} match to be satisfied by the *same*
+# ancestor device, but the numeric removable flag (0/1) lives only on the
+# block-layer disk device (subsystem "block"), while the actual "usb"
+# ancestor's own "removable" attribute is a separate string field
+# ("fixed"/"removable"/"unknown") — and many USB mass-storage bridge
+# chips report "fixed" there regardless of being genuinely removable
+# flash media. No ancestor can satisfy both conditions at once, so a rule
+# built that way silently never matches any USB stick, on any hardware.
+# docs/INSTALL.md's only supported deployment boots from the SD card, so
+# a USB-boot Pi getting its root double-mounted under /media/mural is an
+# accepted residual risk for an unsupported configuration, not something
+# this rule tries to guard against.
+#
+# The 99- prefix is required, not cosmetic: ID_FS_USAGE is set by the
+# blkid builtin invoked from Debian's 60-persistent-storage.rules, and a
+# rule sorting before that one sees the variable unset and never matches.
+sudo tee /etc/udev/rules.d/99-mural-usb.rules > /dev/null <<UDEVEOF
+# Mural USB stick automount. Mounts read-only under ${MEDIA_ROOT} — must
+# match mural's -media-dir flag default (see main.go). See install.sh for
+# why this does not (and structurally cannot) guard against a USB-boot Pi.
+ACTION=="add", SUBSYSTEM=="block", SUBSYSTEMS=="usb", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="vfat|exfat|ntfs", RUN{program}+="/usr/bin/systemd-mount --no-block --collect -o ro,nosuid,nodev,noexec,uid=${CURRENT_UID},gid=${CURRENT_GID},umask=0077 \$devnode ${MEDIA_ROOT}/%k"
+ACTION=="add", SUBSYSTEM=="block", SUBSYSTEMS=="usb", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}!="vfat|exfat|ntfs", RUN{program}+="/usr/bin/systemd-mount --no-block --collect -o ro,nosuid,nodev,noexec \$devnode ${MEDIA_ROOT}/%k"
+UDEVEOF
+
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+# ── 5. Done ───────────────────────────────────────────────────────────────────
 echo ""
 echo "mural installed successfully."
 echo ""
@@ -79,9 +138,12 @@ echo "  2. Edit $CONTENT_DIR/config.toml to set your display hours and slideshow
 echo "  3. Log out and back in (or reboot) for the video/input group membership to take effect"
 echo "  4. Run '$INSTALL_DIR/mural $CONTENT_DIR' from a text console to launch manually,"
 echo "     or configure automatic startup below"
+echo "  5. To update content later, plug in a USB stick (FAT32/exFAT) carrying images"
+echo "     and a top-level config.toml (copy the sample from $CONTENT_DIR) — the sign"
+echo "     picks it up automatically. A stick with no config.toml is ignored entirely."
 echo ""
 
-# ── 5. Offer full system setup ────────────────────────────────────────────────
+# ── 6. Offer full system setup ────────────────────────────────────────────────
 printf "Configure automatic startup (autologin + auto-launch on boot)? [Y/n] "
 read -r response </dev/tty
 case "${response,,}" in
@@ -133,7 +195,7 @@ DROPINEOF
     ;;
 esac
 
-# ── 6. Offer Samba shared folder ───────────────────────────────────────────
+# ── 7. Offer Samba shared folder ───────────────────────────────────────────
 printf "Set up Samba file sharing (access content folder from your network)? [Y/n] "
 read -r response </dev/tty
 case "${response,,}" in

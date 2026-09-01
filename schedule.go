@@ -125,6 +125,25 @@ type Config struct {
 	Slideshow SlideshowConfig `toml:"slideshow"`
 }
 
+// hasAnyOnWindow reports whether cfg defines at least one genuine on-window
+// somewhere across all seven days and all six occurrence lists. A window
+// only counts when w.Off > w.On: a zero-length window ("18:00-18:00") and an
+// overnight window ("22:00-02:00") both fail this test deliberately — see
+// Architect.md's "Defines no on-window" section for why both are rejected
+// rather than silently adopted.
+func hasAnyOnWindow(cfg ScheduleConfig) bool {
+	for _, dc := range []DayConfig{cfg.Monday, cfg.Tuesday, cfg.Wednesday, cfg.Thursday, cfg.Friday, cfg.Saturday, cfg.Sunday} {
+		for _, list := range [][]Window{dc.All, dc.First, dc.Second, dc.Third, dc.Fourth, dc.Last} {
+			for _, w := range list {
+				if w.Off > w.On {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (cfg *ScheduleConfig) forWeekday(d time.Weekday) *DayConfig {
 	switch d {
 	case time.Monday:
@@ -157,6 +176,15 @@ type Schedule struct {
 	mu        sync.RWMutex
 	onTurnOn  func()
 	onTurnOff func()
+
+	// replan signals Start's event goroutine to recompute today's events
+	// immediately instead of sleeping through a config change. Buffered
+	// capacity 1, but the buffer alone gives neither coalescing nor
+	// non-blocking behaviour — every send must go through signalReplan's
+	// select/default, never a plain send, since ApplyConfig runs on the
+	// ingest-result handler's run-loop goroutine and a blocking send there
+	// would freeze the sign exactly as an unbuffered cmdCh send would.
+	replan chan struct{}
 }
 
 // LoadConfig parses the config.toml file at path and returns the full Config.
@@ -176,10 +204,13 @@ func LoadConfig(path string) (*Config, error) {
 // onTurnOn is called at scheduled turn-on (use ss.Reload to reload content and un-pause).
 // onTurnOff is called at scheduled turn-off (use ss.Pause to blank the display).
 func NewSchedule(path string, cfg ScheduleConfig, onTurnOn func(), onTurnOff func()) *Schedule {
-	return &Schedule{path: path, cfg: cfg, onTurnOn: onTurnOn, onTurnOff: onTurnOff}
+	return &Schedule{path: path, cfg: cfg, onTurnOn: onTurnOn, onTurnOff: onTurnOff, replan: make(chan struct{}, 1)}
 }
 
-// reload re-reads config.toml from disk and updates the schedule config atomically.
+// reload re-reads config.toml from disk and updates the schedule config
+// atomically, then signals a re-plan so the change takes effect
+// immediately instead of whenever the event goroutine next wakes on its
+// own.
 func (s *Schedule) reload() error {
 	cfg, err := LoadConfig(s.path)
 	if err != nil {
@@ -188,8 +219,34 @@ func (s *Schedule) reload() error {
 	s.mu.Lock()
 	s.cfg = cfg.Schedule
 	s.mu.Unlock()
+	s.signalReplan()
 	log.Printf("schedule: reloaded from %s", s.path)
 	return nil
+}
+
+// ApplyConfig swaps the schedule config atomically and signals the event
+// goroutine to recompute today's events immediately — without this, a
+// config adopted mid-day would not take effect until the goroutine next
+// woke on its own (up to the next scheduled event, or midnight), which for
+// the headline "stick inserted during scheduled off-hours" scenario could
+// be many hours away. Safe to call from any goroutine, including the
+// run-loop goroutine that handles an accepted ingest.
+func (s *Schedule) ApplyConfig(cfg ScheduleConfig) {
+	s.mu.Lock()
+	s.cfg = cfg
+	s.mu.Unlock()
+	s.signalReplan()
+}
+
+// signalReplan sends on replan without blocking. A plain send would block
+// if a previous signal is still unconsumed, and both reload and
+// ApplyConfig may be called from the run-loop goroutine (via the ingest
+// result handler) — a blocking send there would freeze the sign.
+func (s *Schedule) signalReplan() {
+	select {
+	case s.replan <- struct{}{}:
+	default:
+	}
 }
 
 // Start launches a background goroutine that fires CEC commands at the scheduled times.
@@ -217,34 +274,63 @@ func (s *Schedule) Start() {
 		}
 	}()
 
-	go func() {
-		for {
-			now := time.Now()
-			events := s.eventsForDate(now)
+	go s.runEventLoop()
+}
 
-			// drop events already in the past
-			future := events[:0]
-			for _, e := range events {
-				if e.at.After(now) {
-					future = append(future, e)
-				}
-			}
+// runEventLoop fires CEC commands at the scheduled times, recomputing
+// today's event list from scratch whenever replan fires instead of
+// sleeping through a config change. Both of its waits — the per-event wait
+// and the until-midnight wait — are selects over a timer and replan, not a
+// plain time.Sleep: a bare Sleep cannot be interrupted, and the
+// until-midnight wait matters most of all, since a re-plan during
+// scheduled off-hours (this feature's headline scenario) finds an empty
+// future list and parks here — a re-plan that only broke the per-event
+// loop would never reach it, and the adopted schedule would take effect
+// at midnight instead of now.
+func (s *Schedule) runEventLoop() {
+outer:
+	for {
+		now := time.Now()
+		future := futureEvents(s.eventsForDate(now), now)
 
-			// compute next midnight
-			tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.Local)
-
-			for _, e := range future {
-				time.Sleep(time.Until(e.at))
+		for _, e := range future {
+			timer := time.NewTimer(time.Until(e.at))
+			select {
+			case <-timer.C:
 				if e.turnOn {
 					s.onTurnOn()
 				} else {
 					s.onTurnOff()
 				}
+			case <-s.replan:
+				timer.Stop()
+				continue outer
 			}
-
-			time.Sleep(time.Until(tomorrow))
 		}
-	}()
+
+		tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.Local)
+		timer := time.NewTimer(time.Until(tomorrow))
+		select {
+		case <-timer.C:
+		case <-s.replan:
+			timer.Stop()
+		}
+	}
+}
+
+// futureEvents returns the entries of events whose time is after now,
+// extracted as a pure function so the no-double-fire property after a
+// re-plan can be asserted directly against a hand-built event list and a
+// fixed now, instead of racing a wall clock (Schedule has no injectable
+// clock).
+func futureEvents(events []event, now time.Time) []event {
+	future := events[:0]
+	for _, e := range events {
+		if e.at.After(now) {
+			future = append(future, e)
+		}
+	}
+	return future
 }
 
 // IsOn reports whether the display should be on at time t according to the schedule.
